@@ -1,0 +1,12 @@
+{
+  "app_name": "AtriaTrade",
+  "mode": "paper",
+  "base_currency": "USDT",
+  "starting_capital": 100.0,
+  "profit_reserve_enabled": true,
+  "withdrawal_alert_threshold": 10.0,
+  "live_trading_enabled": false,
+  "exchanges": {
+    "active": []
+  }
+}
