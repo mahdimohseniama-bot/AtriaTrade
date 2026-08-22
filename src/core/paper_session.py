@@ -1,341 +1,160 @@
 import json
 import os
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import datetime
 
 from src.core.capital_manager import CapitalManager
-from src.core.risk_manager import RiskConfig, RiskManager
+from src.core.risk_manager import RiskManager, RiskConfig
 from src.core.trader_engine import TraderEngine
 
 
 class PaperSession:
-    """
-    مدیریت یک نشست Paper Trading با استفاده از TraderEngine واقعی پروژه.
-
-    این کلاس:
-    - معاملات مجازی را باز و بسته می‌کند
-    - تاریخچه معاملات را در JSON ذخیره می‌کند
-    - سود و زیان معاملات را ثبت می‌کند
-    - آمار نشست و Win Rate را محاسبه می‌کند
-    """
-
-    def __init__(
-        self,
-        session_name: str = "default_session",
-        initial_capital: float = 10000.0,
-        risk_config: Optional[RiskConfig] = None,
-        data_dir: str = "data/paper_trades",
-    ):
+    def __init__(self, session_name: str, initial_capital: float = 10000.0, risk_config: RiskConfig = None):
         if not session_name or not isinstance(session_name, str):
-            raise ValueError("session_name must be a non-empty string")
-
+            raise ValueError("Session name must be a non-empty string.")
         if initial_capital <= 0:
-            raise ValueError("initial_capital must be greater than zero")
+            raise ValueError("Initial capital must be positive.")
 
         self.session_name = session_name
-        self.data_dir = data_dir
-        self.session_file = os.path.join(
-            self.data_dir,
-            f"{self.session_name}.json",
-        )
+        self.initial_capital = float(initial_capital)
 
-        os.makedirs(self.data_dir, exist_ok=True)
-
-        self.capital_manager = CapitalManager(
-            initial_capital=float(initial_capital)
-        )
-
-        self.risk_manager = RiskManager(
-            config=risk_config
-        )
-
-        # نام پارامترها مطابق API واقعی TraderEngine است.
+        self.capital_manager = CapitalManager(initial_capital=self.initial_capital)
+        self.risk_manager = RiskManager(config=risk_config or RiskConfig())
         self.engine = TraderEngine(
             capital_manager=self.capital_manager,
-            risk_manager=self.risk_manager,
+            risk_manager=self.risk_manager
         )
 
-        self.history: List[Dict[str, Any]] = []
+        self.trades_history = []
+        self.sessions_dir = "data/paper_trades"
+        os.makedirs(self.sessions_dir, exist_ok=True)
 
-    @staticmethod
-    def _utc_now() -> str:
-        """برگرداندن زمان فعلی به‌صورت UTC و قابل ذخیره در JSON."""
-        return datetime.now(timezone.utc).isoformat()
+    def _get_portfolio_snapshot(self) -> dict:
+        cm = self.capital_manager
+        current_capital = float(getattr(cm, "current_capital", self.initial_capital))
+        profit_reserve = float(getattr(cm, "profit_reserve", 0.0))
+        total_value = float(getattr(cm, "total_value", current_capital + profit_reserve))
 
-    @staticmethod
-    def _read_value(
-        obj: Any,
-        key: str,
-        default: Any = None,
-    ) -> Any:
-        """
-        خواندن مقدار از dict یا object.
+        return {
+            "current_capital": current_capital,
+            "profit_reserve": profit_reserve,
+            "total_value": total_value,
+        }
 
-        TraderEngine در این پروژه برای Position یک object برمی‌گرداند،
-        ولی این تابع برای سازگاری با خروجی‌های dict نیز آماده است.
-        """
-        if isinstance(obj, dict):
-            return obj.get(key, default)
-
-        return getattr(obj, key, default)
-
-    @staticmethod
-    def _to_json_safe(value: Any) -> Any:
-        """
-        تبدیل objectهای پروژه به ساختاری قابل ذخیره در JSON.
-        """
-        if value is None:
-            return None
-
-        if isinstance(value, (str, int, float, bool)):
-            return value
-
-        if isinstance(value, dict):
-            return {
-                str(key): PaperSession._to_json_safe(item)
-                for key, item in value.items()
-            }
-
-        if isinstance(value, (list, tuple)):
-            return [
-                PaperSession._to_json_safe(item)
-                for item in value
-            ]
-
-        if hasattr(value, "__dict__"):
-            return {
-                str(key): PaperSession._to_json_safe(item)
-                for key, item in vars(value).items()
-            }
-
-        return str(value)
-
-    @staticmethod
-    def _is_successful_open(result: Any) -> bool:
-        """
-        تشخیص موفقیت بازشدن معامله.
-
-        در TraderEngine فعلی، خروجی Position است.
-        برای سازگاری، dict و bool نیز پشتیبانی می‌شوند.
-        """
-        if result is None:
-            return False
-
-        if isinstance(result, dict):
-            if "success" in result:
-                return bool(result["success"])
-
-            status = str(result.get("status", "")).upper()
-            if status in {"REJECTED", "FAILED", "ERROR"}:
-                return False
-
-            return True
-
-        if isinstance(result, bool):
-            return result
-
-        status = str(
-            getattr(result, "status", "OPEN")
-        ).upper()
-
-        return status not in {"REJECTED", "FAILED", "ERROR"}
-
-    @staticmethod
-    def _extract_pnl(result: Any) -> Optional[float]:
-        """
-        استخراج PNL از خروجی close_virtual_position.
-
-        در API واقعی، خروجی Position است و pnl به‌صورت attribute
-        داخل آن قرار دارد.
-        """
-        pnl = PaperSession._read_value(result, "pnl")
-
-        if pnl is None and isinstance(result, dict):
-            for key in (
-                "profit",
-                "realized_pnl",
-                "realized_profit",
-            ):
-                if result.get(key) is not None:
-                    pnl = result[key]
-                    break
-
-        if pnl is None:
-            return None
-
-        try:
-            return float(pnl)
-        except (TypeError, ValueError):
-            return None
-
-    def execute_paper_trade(
-        self,
-        symbol: str,
-        side: str,
-        entry_price: float,
-        exit_price: float,
-    ) -> Dict[str, Any]:
-        """
-        اجرای کامل یک معامله مجازی.
-
-        بازکردن:
-            open_virtual_position(
-                symbol=symbol,
-                side=side,
-                current_price=entry_price
-            )
-
-        بستن:
-            close_virtual_position(
-                symbol=symbol,
-                exit_price=exit_price
-            )
-        """
+    def execute_trade(self, symbol: str, side: str, entry_price: float, exit_price: float) -> dict:
         if not symbol or not isinstance(symbol, str):
-            raise ValueError("symbol must be a non-empty string")
-
-        if side not in {"buy", "sell"}:
-            raise ValueError("side must be either 'buy' or 'sell'")
-
+            raise ValueError("Symbol must be a non-empty string.")
+        if side not in ["buy", "sell"]:
+            raise ValueError("Side must be either 'buy' or 'sell'.")
         if entry_price <= 0 or exit_price <= 0:
-            raise ValueError("entry_price and exit_price must be positive")
+            raise ValueError("Prices must be positive.")
 
-        print(
-            f"Executing paper trade: "
-            f"{symbol} {entry_price:,.2f} -> {exit_price:,.2f}"
-        )
-
-        # بازکردن معامله با API واقعی TraderEngine
-        open_result = self.engine.open_virtual_position(
+        open_res = self.engine.open_virtual_position(
             symbol=symbol,
             side=side,
-            current_price=float(entry_price),
+            current_price=entry_price
         )
 
-        if not self._is_successful_open(open_result):
-            record = {
-                "timestamp": self._utc_now(),
+        if isinstance(open_res, str) or getattr(open_res, "status", None) == "REJECTED":
+            trade_record = {
                 "symbol": symbol,
                 "side": side,
-                "status": "REJECTED",
-                "entry_price": float(entry_price),
-                "exit_price": float(exit_price),
+                "entry_price": entry_price,
+                "exit_price": exit_price,
                 "pnl": 0.0,
-                "reason": self._read_value(
-                    open_result,
-                    "reason",
-                    "Virtual position was rejected",
-                ),
+                "status": "REJECTED",
+                "timestamp": datetime.now().isoformat()
             }
+            self.trades_history.append(trade_record)
+            self.save_session()
+            return trade_record
 
-            self.history.append(record)
-            self._save_session()
-            return record
-
-        # بستن معامله با API واقعی TraderEngine
-        close_result = self.engine.close_virtual_position(
+        close_res = self.engine.close_virtual_position(
             symbol=symbol,
-            exit_price=float(exit_price),
+            exit_price=exit_price
         )
 
-        pnl = self._extract_pnl(close_result)
+        pnl_val = getattr(close_res, "pnl", 0.0)
 
-        # در حالت عادی pnl باید از Position خوانده شود.
-        # اگر API مقدار None برگرداند، برای جلوگیری از ثبت اشتباه،
-        # وضعیت معامله را CLOSED ولی مقدار pnl را None نگه می‌داریم.
-        record = {
-            "timestamp": self._utc_now(),
+        trade_record = {
             "symbol": symbol,
             "side": side,
-            "status": str(
-                self._read_value(
-                    close_result,
-                    "status",
-                    "CLOSED",
-                )
-            ).upper(),
-            "entry_price": float(entry_price),
-            "exit_price": float(exit_price),
-            "pnl": pnl,
-            "position": self._to_json_safe(close_result),
-            "portfolio_summary": self._to_json_safe(
-                self.engine.get_portfolio_summary()
-            ),
+            "entry_price": entry_price,
+            "exit_price": exit_price,
+            "pnl": float(pnl_val),
+            "status": "CLOSED",
+            "timestamp": datetime.now().isoformat()
         }
+        self.trades_history.append(trade_record)
+        self.save_session()
+        return trade_record
 
-        self.history.append(record)
-        self._save_session()
+    def get_session_stats(self) -> dict:
+        closed_trades = [t for t in self.trades_history if t.get("status") == "CLOSED"]
+        total_trades = len(closed_trades)
+        winning_trades = len([t for t in closed_trades if float(t.get("pnl", 0.0)) > 0])
+        losing_trades = len([t for t in closed_trades if float(t.get("pnl", 0.0)) < 0])
+        win_rate = (winning_trades / total_trades * 100.0) if total_trades > 0 else 0.0
+        total_pnl = sum(float(t.get("pnl", 0.0)) for t in closed_trades)
 
-        return record
-
-    def _save_session(self) -> None:
-        """ذخیره نشست و معاملات در فایل JSON."""
-        data = {
-            "session_name": self.session_name,
-            "last_updated": self._utc_now(),
-            "summary": self._to_json_safe(
-                self.engine.get_portfolio_summary()
-            ),
-            "total_trades": len(self.history),
-            "trades": self._to_json_safe(self.history),
-        }
-
-        with open(
-            self.session_file,
-            "w",
-            encoding="utf-8",
-        ) as file:
-            json.dump(
-                data,
-                file,
-                indent=4,
-                ensure_ascii=False,
-            )
-
-    def get_session_stats(self) -> Dict[str, Any]:
-        """محاسبه آمار معاملات بسته‌شده نشست."""
-        summary = self.engine.get_portfolio_summary()
-
-        closed_trades = [
-            trade
-            for trade in self.history
-            if trade.get("status") == "CLOSED"
-        ]
-
-        winning_trades = [
-            trade
-            for trade in closed_trades
-            if isinstance(trade.get("pnl"), (int, float))
-            and trade["pnl"] > 0
-        ]
-
-        losing_trades = [
-            trade
-            for trade in closed_trades
-            if isinstance(trade.get("pnl"), (int, float))
-            and trade["pnl"] < 0
-        ]
-
-        total_closed = len(closed_trades)
-
-        win_rate = (
-            len(winning_trades) / total_closed * 100
-            if total_closed > 0
-            else 0.0
-        )
-
-        total_pnl = sum(
-            float(trade["pnl"])
-            for trade in closed_trades
-            if isinstance(trade.get("pnl"), (int, float))
-        )
+        portfolio = self._get_portfolio_snapshot()
 
         return {
             "session_name": self.session_name,
-            "total_trades": total_closed,
-            "winning_trades": len(winning_trades),
-            "losing_trades": len(losing_trades),
+            "initial_capital": self.initial_capital,
+            "current_capital": portfolio["current_capital"],
+            "profit_reserve": portfolio["profit_reserve"],
+            "total_value": portfolio["total_value"],
+            "total_trades": total_trades,
+            "winning_trades": winning_trades,
+            "losing_trades": losing_trades,
             "win_rate_pct": round(win_rate, 2),
-            "total_pnl": round(total_pnl, 8),
-            "portfolio": self._to_json_safe(summary),
+            "total_pnl": round(total_pnl, 4),
         }
+
+    def _to_json_safe(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        if hasattr(obj, "__dict__"):
+            return {k: self._to_json_safe(v) for k, v in obj.__dict__.items()}
+        if isinstance(obj, dict):
+            return {k: self._to_json_safe(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [self._to_json_safe(item) for item in obj]
+        return obj
+
+    def save_session(self):
+        file_path = os.path.join(self.sessions_dir, f"{self.session_name}.json")
+        data = {
+            "session_name": self.session_name,
+            "initial_capital": self.initial_capital,
+            "portfolio": self._get_portfolio_snapshot(),
+            "stats": self.get_session_stats(),
+            "trades_history": self._to_json_safe(self.trades_history),
+            "updated_at": datetime.now().isoformat(),
+        }
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+
+    @classmethod
+    def load_session(cls, session_name: str) -> "PaperSession":
+        file_path = os.path.join("data/paper_trades", f"{session_name}.json")
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"Session file not found: {file_path}")
+
+        with open(file_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        initial_cap = float(data.get("initial_capital", 10000.0))
+        session = cls(session_name=session_name, initial_capital=initial_cap)
+
+        session.trades_history = data.get("trades_history", [])
+        portfolio = data.get("portfolio", {})
+
+        if "current_capital" in portfolio:
+            session.capital_manager.current_capital = float(portfolio["current_capital"])
+        if "profit_reserve" in portfolio:
+            session.capital_manager.profit_reserve = float(portfolio["profit_reserve"])
+        if "total_value" in portfolio and hasattr(session.capital_manager, "total_value"):
+            session.capital_manager.total_value = float(portfolio["total_value"])
+
+        return session

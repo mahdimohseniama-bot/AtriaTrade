@@ -31,3 +31,5 @@ backups/*
 
 # Termux temporary files
 *.tmp
+
+data/
