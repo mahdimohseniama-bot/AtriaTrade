@@ -1,249 +1,303 @@
 """
-موتور بک‌تست AtriaTrade (Backtesting Engine)
-==============================================
-شبیه‌سازی و ارزیابی استراتژی‌ها بر روی داده‌های تاریخی کندل:
-- دریافت داده‌های کندل استیک (OHLCV)
-- اعمال منطق ورود و خروج معامله
-- محاسبه متریک‌های استاندارد عملکرد (Win Rate، Max Drawdown، Profit Factor، Sharpe Ratio)
-- بدون ریسک مالی و کاملاً آفلاین
+Backtest Engine for AtriaTrade.
+
+This module runs a trading strategy against historical OHLCV data.
+It is simulation-only and does not connect to any exchange.
 """
 
-import math
-from dataclasses import dataclass
-from typing import List, Dict, Any, Optional
-
-
-@dataclass
-class BacktestTrade:
-    """اطلاعات یک معامله در بک‌تست"""
-    trade_id: int
-    symbol: str
-    side: str              # BUY يا SELL
-    entry_time: str
-    entry_price: float
-    quantity: float
-    stop_loss: float
-    take_profit: float
-    exit_time: str = ""
-    exit_price: float = 0.0
-    pnl: float = 0.0
-    return_pct: float = 0.0
-    reason: str = ""       # TP, SL, SIGNAL, END_OF_DATA
+from typing import Any, Dict, List, Optional
 
 
 class BacktestEngine:
-    """موتور پردازش داده‌های تاریخی و اجرای استراتژی"""
+    """Simulation-only engine for testing trading strategies."""
 
-    def __init__(self, initial_capital: float = 10000.0, fee_rate: float = 0.001,
-                 max_risk_per_trade: float = 0.02, max_position_value: float = 5000.0):
+    def __init__(
+        self,
+        strategy: Any,
+        initial_capital: float = 1000.0,
+        fee_rate: float = 0.001,
+    ) -> None:
+        if strategy is None:
+            raise ValueError("strategy is required")
+
         if initial_capital <= 0:
-            raise ValueError("سرمایه اولیه باید بزرگ‌تر از صفر باشد")
-        if fee_rate < 0:
-            raise ValueError("کارمزد نمی‌تواند منفی باشد")
-        if not 0 < max_risk_per_trade <= 0.1:
-            raise ValueError("ریسک هر معامله باید بین 0 و 0.1 باشد")
+            raise ValueError("initial_capital must be greater than zero")
 
+        if fee_rate < 0:
+            raise ValueError("fee_rate cannot be negative")
+
+        self.strategy = strategy
         self.initial_capital = float(initial_capital)
         self.fee_rate = float(fee_rate)
-        self.max_risk_per_trade = float(max_risk_per_trade)
-        self.max_position_value = float(max_position_value)
 
-        self.cash = float(initial_capital)
-        self.trades: List[BacktestTrade] = []
-        self.equity_curve: List[float] = [float(initial_capital)]
+        self.capital: float = self.initial_capital
+        self.position: Optional[Dict[str, Any]] = None
+        self.trades_history: List[Dict[str, Any]] = []
+        self.equity_curve: List[float] = [self.initial_capital]
 
-    def run(self, symbol: str, candles: List[Dict[str, Any]], strategy) -> Dict[str, Any]:
-        """
-        اجرای بک‌تست روی لیست کندل‌ها
-        ساختار هر کندل باید شامل: timestamp, open, high, low, close, volume باشد.
-        """
-        if not candles:
-            raise ValueError("لیست کندل‌ها خالی است")
+    def reset(self) -> None:
+        """Reset all simulation state."""
+        self.capital = self.initial_capital
+        self.position = None
+        self.trades_history = []
+        self.equity_curve = [self.initial_capital]
 
-        self.cash = float(self.initial_capital)
-        self.trades = []
-        self.equity_curve = [float(self.initial_capital)]
+    @staticmethod
+    def _validate_candle(candle: Dict[str, Any]) -> None:
+        """Validate one historical OHLCV candle."""
+        if not isinstance(candle, dict):
+            raise TypeError("Each historical candle must be a dictionary")
 
-        current_trade: Optional[BacktestTrade] = None
-        trade_counter = 1
-        history_closes: List[float] = []
+        if "close" not in candle:
+            raise ValueError("Each candle must contain a close value")
 
-        for i, candle in enumerate(candles):
-            timestamp = candle.get("timestamp", str(i))
-            high = float(candle["high"])
-            low = float(candle["low"])
-            close = float(candle["close"])
-            history_closes.append(close)
+        try:
+            close_price = float(candle["close"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Candle close must be numeric") from exc
 
-            # ۱. بررسی حد سود و حد ضرر پوزیشن باز با High و Low کندل جاری
-            if current_trade is not None:
-                closed = False
-                if current_trade.side == "BUY":
-                    if current_trade.stop_loss > 0 and low <= current_trade.stop_loss:
-                        self._close_position(current_trade, current_trade.stop_loss, timestamp, "STOP_LOSS")
-                        closed = True
-                    elif current_trade.take_profit > 0 and high >= current_trade.take_profit:
-                        self._close_position(current_trade, current_trade.take_profit, timestamp, "TAKE_PROFIT")
-                        closed = True
-                else:  # SELL
-                    if current_trade.stop_loss > 0 and high >= current_trade.stop_loss:
-                        self._close_position(current_trade, current_trade.stop_loss, timestamp, "STOP_LOSS")
-                        closed = True
-                    elif current_trade.take_profit > 0 and low <= current_trade.take_profit:
-                        self._close_position(current_trade, current_trade.take_profit, timestamp, "TAKE_PROFIT")
-                        closed = True
+        if close_price <= 0:
+            raise ValueError("Candle close must be greater than zero")
 
-                if closed:
-                    current_trade = None
+    @staticmethod
+    def _normalize_signal(signal: Any) -> str:
+        """Normalize strategy output to BUY, SELL, or HOLD."""
+        if hasattr(signal, "value"):
+            signal = signal.value
 
-            # ۲. دریافت سیگنال از استراتژی
-            signal = strategy.generate_signal(history_closes)
+        if signal is None:
+            return "HOLD"
 
-            # ۳. پردازش خروج بر اساس سیگنال معکوس
-            if current_trade is not None:
-                if (current_trade.side == "BUY" and signal == "SELL") or \
-                   (current_trade.side == "SELL" and signal == "BUY"):
-                    self._close_position(current_trade, close, timestamp, "SIGNAL")
-                    current_trade = None
+        normalized = str(signal).strip().upper()
 
-            # ۴. ورود به معامله جدید در صورت نبود پوزیشن باز
-            if current_trade is None and signal in ("BUY", "SELL"):
-                tp, sl = 0.0, 0.0
-                if hasattr(strategy, "get_tp_sl"):
-                    tp, sl = strategy.get_tp_sl(signal, close)
+        if normalized not in {"BUY", "SELL", "HOLD"}:
+            return "HOLD"
 
-                # محاسبه حجم ورود
-                risk_amount = self.cash * self.max_risk_per_trade
-                if sl > 0 and abs(close - sl) > 0:
-                    quantity = risk_amount / abs(close - sl)
-                else:
-                    quantity = risk_amount / (close * 0.02)  # پیش‌فرض ۲ درصد فاصله
+        return normalized
 
-                max_qty = self.max_position_value / close
-                quantity = min(quantity, max_qty, self.cash / close)
-                quantity = round(quantity, 6)
+    def _calculate_equity(self, current_price: float) -> float:
+        """Calculate current account equity."""
+        if self.position is None:
+            return float(self.capital)
 
-                cost = quantity * close
-                fee = cost * self.fee_rate
-                if cost + fee <= self.cash and quantity > 0:
-                    self.cash -= (cost + fee)
-                    current_trade = BacktestTrade(
-                        trade_id=trade_counter,
-                        symbol=symbol,
-                        side=signal,
-                        entry_time=timestamp,
-                        entry_price=close,
-                        quantity=quantity,
-                        stop_loss=sl,
-                        take_profit=tp
-                    )
-                    self.trades.append(current_trade)
-                    trade_counter += 1
+        position_value = self.position["quantity"] * current_price
+        return float(position_value)
 
-            # ثبت ارزش دارایی
-            floating_pnl = 0.0
-            if current_trade is not None:
-                if current_trade.side == "BUY":
-                    floating_pnl = (close - current_trade.entry_price) * current_trade.quantity
-                else:
-                    floating_pnl = (current_trade.entry_price - close) * current_trade.quantity
-            equity = self.cash + (current_trade.quantity * current_trade.entry_price if current_trade else 0.0) + floating_pnl
-            self.equity_curve.append(round(equity, 2))
+    def _open_position(
+        self,
+        symbol: str,
+        price: float,
+        timestamp: Any,
+    ) -> None:
+        """Open a long position using all available capital."""
+        if self.position is not None:
+            return
 
-        # بستن پوزیشن باز باقی‌مانده در انتهای داده‌ها
-        if current_trade is not None:
-            last_candle = candles[-1]
-            self._close_position(current_trade, float(last_candle["close"]),
-                                 last_candle.get("timestamp", "END"), "END_OF_DATA")
+        if self.capital <= 0:
+            return
 
-        return self.calculate_metrics()
+        gross_capital = float(self.capital)
+        entry_fee = gross_capital * self.fee_rate
+        investable_capital = gross_capital - entry_fee
 
-    def _close_position(self, trade: BacktestTrade, exit_price: float, exit_time: str, reason: str):
-        """ثبت خروج و به‌روزرسانی نقدینگی با کسر کارمزد"""
-        trade.exit_price = exit_price
-        trade.exit_time = exit_time
-        trade.reason = reason
+        if investable_capital <= 0:
+            return
 
-        gross_value = trade.quantity * exit_price
-        fee = gross_value * self.fee_rate
+        quantity = investable_capital / price
 
-        if trade.side == "BUY":
-            pnl = (exit_price - trade.entry_price) * trade.quantity - (fee + (trade.quantity * trade.entry_price * self.fee_rate))
+        self.position = {
+            "symbol": symbol,
+            "entry_price": float(price),
+            "quantity": float(quantity),
+            "entry_time": timestamp,
+            "invested": gross_capital,
+            "entry_fee": entry_fee,
+        }
+
+        self.capital = 0.0
+
+    def _close_position(
+        self,
+        symbol: str,
+        price: float,
+        timestamp: Any,
+        closed_at_end: bool = False,
+    ) -> None:
+        """Close the current long position and save trade information."""
+        if self.position is None:
+            return
+
+        gross_return = self.position["quantity"] * price
+        exit_fee = gross_return * self.fee_rate
+        net_return = gross_return - exit_fee
+
+        invested = self.position["invested"]
+        pnl = net_return - invested
+
+        if invested > 0:
+            pnl_percent = (pnl / invested) * 100.0
         else:
-            pnl = (trade.entry_price - exit_price) * trade.quantity - (fee + (trade.quantity * trade.entry_price * self.fee_rate))
+            pnl_percent = 0.0
 
-        trade.pnl = round(pnl, 2)
-        invested = trade.quantity * trade.entry_price
-        trade.return_pct = round((pnl / invested) * 100, 2) if invested > 0 else 0.0
+        trade = {
+            "symbol": symbol,
+            "entry_price": round(self.position["entry_price"], 8),
+            "exit_price": round(price, 8),
+            "quantity": round(self.position["quantity"], 8),
+            "entry_time": self.position["entry_time"],
+            "exit_time": timestamp,
+            "invested": round(invested, 8),
+            "entry_fee": round(self.position["entry_fee"], 8),
+            "exit_fee": round(exit_fee, 8),
+            "gross_return": round(gross_return, 8),
+            "net_return": round(net_return, 8),
+            "pnl": round(pnl, 8),
+            "pnl_percent": round(pnl_percent, 8),
+        }
 
-        # بازگشت سرمایه معامله و سود/زیان خالص به صندوق نقدینگی
-        self.cash = round(self.cash + invested + trade.pnl, 2)
+        if closed_at_end:
+            trade["closed_at_end"] = True
 
-    def calculate_metrics(self) -> Dict[str, Any]:
-        """محاسبه خروجی‌های آماری عملکرد بک‌تست"""
-        total_trades = len(self.trades)
-        if total_trades == 0:
-            return {
-                "initial_capital": self.initial_capital,
-                "final_equity": self.initial_capital,
-                "total_net_pnl": 0.0,
-                "total_return_pct": 0.0,
-                "total_trades": 0,
-                "win_rate": 0.0,
-                "profit_factor": 0.0,
-                "max_drawdown_pct": 0.0,
-                "sharpe_ratio": 0.0
-            }
+        self.trades_history.append(trade)
+        self.capital = float(net_return)
+        self.position = None
 
-        wins = [t for t in self.trades if t.pnl > 0]
-        losses = [t for t in self.trades if t.pnl < 0]
+    def run(
+        self,
+        historical_data: List[Dict[str, Any]],
+        symbol: str = "BTCUSDT",
+    ) -> Dict[str, Any]:
+        """
+        Run the strategy over historical OHLCV candles.
 
-        total_net_pnl = round(sum(t.pnl for t in self.trades), 2)
-        final_equity = round(self.initial_capital + total_net_pnl, 2)
-        total_return_pct = round((total_net_pnl / self.initial_capital) * 100, 2)
+        The strategy receives only close prices.
+        This is compatible with SMACrossStrategy.
+        """
+        if not isinstance(historical_data, list):
+            raise TypeError("historical_data must be a list")
 
-        win_rate = round((len(wins) / total_trades) * 100, 2)
+        if len(historical_data) < 5:
+            raise ValueError(
+                "At least 5 historical candles are required"
+            )
 
-        gross_profit = sum(t.pnl for t in wins)
-        gross_loss = abs(sum(t.pnl for t in losses))
-        profit_factor = round(gross_profit / gross_loss, 2) if gross_loss > 0 else (round(gross_profit, 2) if gross_profit > 0 else 0.0)
+        self.reset()
 
-        # محاسبه Maximum Drawdown
-        peak = self.equity_curve[0]
-        max_dd = 0.0
-        for eq in self.equity_curve:
-            if eq > peak:
-                peak = eq
-            dd = (peak - eq) / peak if peak > 0 else 0.0
-            if dd > max_dd:
-                max_dd = dd
-        max_drawdown_pct = round(max_dd * 100, 2)
+        for index, candle in enumerate(historical_data):
+            self._validate_candle(candle)
 
-        # محاسبه تقریب Sharpe Ratio
-        returns = []
-        for i in range(1, len(self.equity_curve)):
-            prev = self.equity_curve[i - 1]
-            if prev > 0:
-                returns.append((self.equity_curve[i] - prev) / prev)
+            current_price = float(candle["close"])
+            timestamp = candle.get("timestamp", index)
 
-        sharpe = 0.0
-        if len(returns) > 1:
-            mean_r = sum(returns) / len(returns)
-            variance = sum((r - mean_r) ** 2 for r in returns) / (len(returns) - 1)
-            std_dev = math.sqrt(variance)
-            if std_dev > 0:
-                sharpe = round((mean_r / std_dev) * math.sqrt(252), 2)  # استاندارد سالانه
+            window = historical_data[: index + 1]
+
+            close_prices = [
+                float(window_candle["close"])
+                for window_candle in window
+            ]
+
+            strategy_signal = self.strategy.generate_signal(close_prices)
+            signal = self._normalize_signal(strategy_signal)
+
+            if signal == "BUY" and self.position is None:
+                self._open_position(
+                    symbol=symbol,
+                    price=current_price,
+                    timestamp=timestamp,
+                )
+
+            elif signal == "SELL" and self.position is not None:
+                self._close_position(
+                    symbol=symbol,
+                    price=current_price,
+                    timestamp=timestamp,
+                )
+
+            current_equity = self._calculate_equity(current_price)
+            self.equity_curve.append(round(current_equity, 8))
+
+        if self.position is not None:
+            last_candle = historical_data[-1]
+            last_price = float(last_candle["close"])
+            last_timestamp = last_candle.get(
+                "timestamp",
+                len(historical_data) - 1,
+            )
+
+            self._close_position(
+                symbol=symbol,
+                price=last_price,
+                timestamp=last_timestamp,
+                closed_at_end=True,
+            )
+
+            self.equity_curve[-1] = round(self.capital, 8)
+
+        return self.get_summary()
+
+    def get_summary(self) -> Dict[str, Any]:
+        """Return performance metrics."""
+        total_trades = len(self.trades_history)
+
+        wins = [
+            trade
+            for trade in self.trades_history
+            if trade["pnl"] > 0
+        ]
+
+        losses = [
+            trade
+            for trade in self.trades_history
+            if trade["pnl"] <= 0
+        ]
+
+        wins_count = len(wins)
+        losses_count = len(losses)
+
+        if total_trades > 0:
+            win_rate_percent = (
+                wins_count / total_trades
+            ) * 100.0
+        else:
+            win_rate_percent = 0.0
+
+        net_profit = self.capital - self.initial_capital
+
+        net_profit_percent = (
+            net_profit / self.initial_capital
+        ) * 100.0
+
+        peak_equity = self.initial_capital
+        max_drawdown_percent = 0.0
+
+        for equity in self.equity_curve:
+            if equity > peak_equity:
+                peak_equity = equity
+
+            if peak_equity > 0:
+                drawdown_percent = (
+                    (peak_equity - equity) / peak_equity
+                ) * 100.0
+
+                if drawdown_percent > max_drawdown_percent:
+                    max_drawdown_percent = drawdown_percent
 
         return {
-            "initial_capital": self.initial_capital,
-            "final_equity": final_equity,
-            "total_net_pnl": total_net_pnl,
-            "total_return_pct": total_return_pct,
-            "total_trades": total_trades,
-            "winning_trades": len(wins),
-            "losing_trades": len(losses),
-            "win_rate_pct": win_rate,
-            "profit_factor": profit_factor,
-            "max_drawdown_pct": max_drawdown_pct,
-            "sharpe_ratio": sharpe
+            "initial_capital": float(self.initial_capital),
+            "final_capital": float(round(self.capital, 8)),
+            "net_profit": float(round(net_profit, 8)),
+            "net_profit_percent": float(
+                round(net_profit_percent, 8)
+            ),
+            "total_trades": int(total_trades),
+            "wins": int(wins_count),
+            "losses": int(losses_count),
+            "win_rate_percent": float(
+                round(win_rate_percent, 8)
+            ),
+            "max_drawdown_percent": float(
+                round(max_drawdown_percent, 8)
+            ),
+            "closed_trades": list(self.trades_history),
+            "equity_curve": list(self.equity_curve),
         }

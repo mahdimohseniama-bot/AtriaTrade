@@ -1,167 +1,171 @@
-"""مدیریت ریسک — AtriaTrade"""
-from __future__ import annotations
+"""
+Advanced Risk Manager for AtriaTrade.
 
-from datetime import date
-from typing import Optional
+Calculates position sizing, stop loss, take profit,
+and enforces safety constraints for simulation and paper trading.
+
+Simulation-only module.
+No exchange connection.
+No real trading.
+"""
+
+from typing import Any, Dict, Optional
 
 
 class RiskManager:
+    """
+    Advanced Risk Management Engine.
+
+    Parameters:
+    - default_risk_per_trade_percent: percentage of total capital risked per trade (e.g. 1.0 = 1%)
+    - max_capital_allocation_percent: maximum capital percentage allocated to a single trade (e.g. 20.0 = 20%)
+    - default_risk_reward_ratio: ratio of profit target to risk distance (e.g. 2.0 = 2:1 R:R)
+    - max_daily_loss_percent: maximum cumulative daily loss allowed before risk halt
+    """
+
     def __init__(
         self,
-        capital: Optional[float] = None,
-        initial_capital: Optional[float] = None,
-        max_risk_percent: float = 1.0,
-        max_position_percent: float = 20.0,
+        default_risk_per_trade_percent: float = 1.0,
+        max_capital_allocation_percent: float = 25.0,
+        default_risk_reward_ratio: float = 2.0,
         max_daily_loss_percent: float = 5.0,
     ) -> None:
-        if capital is None:
-            capital = initial_capital if initial_capital is not None else 10000.0
-        self._validate_positive(capital, "capital")
-        self._validate_positive(max_risk_percent, "max_risk_percent")
-        self._validate_positive(max_position_percent, "max_position_percent")
-        self._validate_positive(max_daily_loss_percent, "max_daily_loss_percent")
+        if default_risk_per_trade_percent <= 0 or default_risk_per_trade_percent > 100:
+            raise ValueError("default_risk_per_trade_percent must be between 0 and 100")
+        if max_capital_allocation_percent <= 0 or max_capital_allocation_percent > 100:
+            raise ValueError("max_capital_allocation_percent must be between 0 and 100")
+        if default_risk_reward_ratio <= 0:
+            raise ValueError("default_risk_reward_ratio must be greater than 0")
+        if max_daily_loss_percent <= 0 or max_daily_loss_percent > 100:
+            raise ValueError("max_daily_loss_percent must be between 0 and 100")
 
-        self.capital = float(capital)
-        self.max_risk_percent = float(max_risk_percent)
-        self.max_position_percent = float(max_position_percent)
-        self.max_daily_loss_percent = float(max_daily_loss_percent)
-        self._daily_loss: dict[str, float] = {}
+        self.risk_per_trade_pct = float(default_risk_per_trade_percent)
+        self.max_capital_alloc_pct = float(max_capital_allocation_percent)
+        self.risk_reward_ratio = float(default_risk_reward_ratio)
+        self.max_daily_loss_pct = float(max_daily_loss_percent)
 
-    @staticmethod
-    def _validate_positive(value, name: str) -> None:
-        if value is None or not isinstance(value, (int, float)) or value <= 0:
-            raise ValueError(f"{name} باید عددی بزرگ‌تر از صفر باشد")
-
-    # ---------- محاسبات ----------
-    def calculate_risk_amount(self) -> float:
-        """حداکثر مبلغ ریسک مجاز برای هر معامله"""
-        return self.capital * self.max_risk_percent / 100.0
-
-    def calculate_position_size(self, entry_price: float, stop_loss: float) -> float:
-        """حجم بر اساس ریسک: مبلغ ریسک تقسیم بر فاصله قیمت تا حد ضرر"""
-        if entry_price is None or entry_price <= 0:
-            raise ValueError("entry_price باید بزرگ‌تر از صفر باشد")
-        if stop_loss is None or stop_loss <= 0:
-            raise ValueError("stop_loss باید بزرگ‌تر از صفر باشد")
-        distance = abs(entry_price - stop_loss)
-        if distance <= 0:
-            raise ValueError("فاصله Entry تا Stop Loss باید بزرگ‌تر از صفر باشد")
-        return self.calculate_risk_amount() / distance
-
-    def calculate_position_value(self, quantity: float, entry_price: float) -> float:
-        if quantity is None or quantity <= 0 or entry_price is None or entry_price <= 0:
-            raise ValueError("quantity و entry_price باید بزرگ‌تر از صفر باشند")
-        return quantity * entry_price
-
-    def calculate_max_position_value(self) -> float:
-        return self.capital * self.max_position_percent / 100.0
-
-    # ---------- اعتبارسنجی ریسک معامله ----------
-    def validate_trade_risk(
+    def calculate_levels(
         self,
-        symbol: str,
-        side,
         entry_price: float,
-        stop_loss: float,
-        quantity: float,
-    ) -> dict:
-        if hasattr(side, "value"):
-            side = str(side.value).upper()
-        else:
-            side = str(side).upper()
+        side: str = "BUY",
+        stop_loss_distance_percent: Optional[float] = None,
+        stop_loss_price: Optional[float] = None,
+        risk_reward_ratio: Optional[float] = None,
+    ) -> Dict[str, float]:
+        """
+        Calculate precise Stop Loss and Take Profit prices.
+        """
+        if entry_price <= 0:
+            raise ValueError("entry_price must be greater than zero")
+
+        side = side.upper()
         if side not in ("BUY", "SELL"):
-            return {"allowed": False, "reason": "سمت نامعتبر است", "symbol": symbol}
+            raise ValueError("side must be BUY or SELL")
 
-        if entry_price is None or entry_price <= 0:
-            return {"allowed": False, "reason": "قیمت ورود نامعتبر است", "symbol": symbol}
-        if stop_loss is None or stop_loss <= 0:
-            return {"allowed": False, "reason": "حد ضرر نامعتبر است", "symbol": symbol}
-        if quantity is None or quantity <= 0:
-            return {"allowed": False, "reason": "حجم نامعتبر است", "symbol": symbol}
+        rr = float(risk_reward_ratio or self.risk_reward_ratio)
+        if rr <= 0:
+            raise ValueError("risk_reward_ratio must be positive")
 
-        # جهت حد ضرر
-        if side == "BUY" and stop_loss >= entry_price:
-            return {"allowed": False, "reason": "در BUY حد ضرر باید پایین‌تر از قیمت ورود باشد", "symbol": symbol}
-        if side == "SELL" and stop_loss <= entry_price:
-            return {"allowed": False, "reason": "در SELL حد ضرر باید بالاتر از قیمت ورود باشد", "symbol": symbol}
+        if stop_loss_price is not None:
+            sl = float(stop_loss_price)
+            if side == "BUY" and sl >= entry_price:
+                raise ValueError("BUY stop_loss_price must be below entry_price")
+            if side == "SELL" and sl <= entry_price:
+                raise ValueError("SELL stop_loss_price must be above entry_price")
+            risk_dist = abs(entry_price - sl)
+        elif stop_loss_distance_percent is not None:
+            if stop_loss_distance_percent <= 0 or stop_loss_distance_percent >= 100:
+                raise ValueError("stop_loss_distance_percent must be between 0 and 100")
+            risk_dist = entry_price * (stop_loss_distance_percent / 100.0)
+            sl = entry_price - risk_dist if side == "BUY" else entry_price + risk_dist
+        else:
+            raise ValueError("Must provide either stop_loss_distance_percent or stop_loss_price")
 
-        # حداکثر ریسک هر معامله
-        risk_amount = abs(entry_price - stop_loss) * quantity
-        max_risk = self.calculate_risk_amount()
-        if risk_amount > max_risk + 1e-9:
-            return {
-                "allowed": False,
-                "reason": f"ریسک معامله {risk_amount:.2f} از سقف مجاز {max_risk:.2f} بیشتر است",
-                "symbol": symbol,
-                "risk_amount": risk_amount,
-            }
+        if side == "BUY":
+            tp = entry_price + (risk_dist * rr)
+        else:
+            tp = entry_price - (risk_dist * rr)
+            if tp <= 0:
+                tp = 0.0001
 
-        # حداکثر ارزش پوزیشن
-        position_value = self.calculate_position_value(quantity, entry_price)
-        max_position_value = self.calculate_max_position_value()
-        if position_value > max_position_value + 1e-9:
-            return {
-                "allowed": False,
-                "reason": f"ارزش پوزیشن {position_value:.2f} از سقف {max_position_value:.2f} بیشتر است",
-                "symbol": symbol,
-                "position_value": position_value,
-            }
+        return {
+            "entry_price": float(entry_price),
+            "stop_loss": round(float(sl), 8),
+            "take_profit": round(float(tp), 8),
+            "risk_distance": round(float(risk_dist), 8),
+            "risk_reward_ratio": rr,
+        }
 
-        # سقف ضرر روزانه
-        if not self.can_trade_today():
-            return {
-                "allowed": False,
-                "reason": "سقف ضرر روزانه تکمیل شده است",
-                "symbol": symbol,
-            }
+    def calculate_position_size(
+        self,
+        capital: float,
+        entry_price: float,
+        stop_loss_price: float,
+        side: str = "BUY",
+        risk_percent: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """
+        Calculate position size and allocated capital based on defined risk.
+        Enforces maximum capital allocation cap.
+        """
+        if capital <= 0:
+            raise ValueError("capital must be greater than zero")
+        if entry_price <= 0:
+            raise ValueError("entry_price must be greater than zero")
+
+        side = side.upper()
+        if side not in ("BUY", "SELL"):
+            raise ValueError("side must be BUY or SELL")
+
+        risk_pct = float(risk_percent or self.risk_per_trade_pct)
+        if risk_pct <= 0 or risk_pct > 100:
+            raise ValueError("risk_percent must be between 0 and 100")
+
+        risk_amount = capital * (risk_pct / 100.0)
+
+        if side == "BUY":
+            if stop_loss_price >= entry_price:
+                raise ValueError("BUY stop_loss_price must be strictly below entry_price")
+            risk_per_unit = entry_price - stop_loss_price
+        else:
+            if stop_loss_price <= entry_price:
+                raise ValueError("SELL stop_loss_price must be strictly above entry_price")
+            risk_per_unit = stop_loss_price - entry_price
+
+        raw_units = risk_amount / risk_per_unit
+        allocated_capital = raw_units * entry_price
+
+        # Cap by maximum capital allocation
+        max_allowed_capital = capital * (self.max_capital_alloc_pct / 100.0)
+        is_capped = False
+
+        if allocated_capital > max_allowed_capital:
+            allocated_capital = max_allowed_capital
+            raw_units = allocated_capital / entry_price
+            risk_amount = raw_units * risk_per_unit
+            is_capped = True
 
         return {
             "allowed": True,
-            "reason": "OK",
-            "symbol": symbol,
-            "risk_amount": risk_amount,
-            "position_value": position_value,
-            "max_position_value": max_position_value,
-            "max_risk_amount": max_risk,
+            "units": round(float(raw_units), 8),
+            "allocated_capital": round(float(allocated_capital), 8),
+            "risk_amount": round(float(risk_amount), 8),
+            "risk_percent": round(float((risk_amount / capital) * 100.0), 4),
+            "is_capped": is_capped,
+            "max_allowed_capital": round(float(max_allowed_capital), 8),
         }
 
-    # ---------- ضرر روزانه ----------
-    def _today(self) -> str:
-        return date.today().isoformat()
-
-    def record_daily_loss(self, amount: float) -> float:
-        if amount is None or amount <= 0:
-            raise ValueError("amount باید بزرگ‌تر از صفر باشد")
-        today = self._today()
-        self._daily_loss[today] = self._daily_loss.get(today, 0.0) + float(amount)
-        return self._daily_loss[today]
-
-    def get_today_loss(self) -> float:
-        return self._daily_loss.get(self._today(), 0.0)
-
-    def get_max_daily_loss_amount(self) -> float:
-        return self.capital * self.max_daily_loss_percent / 100.0
-
-    def can_trade_today(self) -> bool:
-        return self.get_today_loss() < self.get_max_daily_loss_amount()
-
-    def reset_daily_loss(self) -> None:
-        self._daily_loss[self._today()] = 0.0
-
-    # ---------- سرمایه ----------
-    def update_capital(self, new_capital: float) -> None:
-        self._validate_positive(new_capital, "new_capital")
-        self.capital = float(new_capital)
-
-    def get_status(self) -> dict:
+    def validate_daily_risk(
+        self,
+        current_daily_loss_percent: float,
+    ) -> Dict[str, Any]:
+        """
+        Check if trading should be halted due to hitting daily loss limits.
+        """
+        halt = current_daily_loss_percent >= self.max_daily_loss_pct
         return {
-            "capital": self.capital,
-            "max_risk_percent": self.max_risk_percent,
-            "max_risk_amount": self.calculate_risk_amount(),
-            "max_position_percent": self.max_position_percent,
-            "max_position_value": self.calculate_max_position_value(),
-            "max_daily_loss_percent": self.max_daily_loss_percent,
-            "max_daily_loss_amount": self.get_max_daily_loss_amount(),
-            "today_loss": self.get_today_loss(),
-            "can_trade_today": self.can_trade_today(),
+            "trading_allowed": not halt,
+            "current_loss_percent": float(current_daily_loss_percent),
+            "max_daily_loss_percent": self.max_daily_loss_pct,
+            "reason": "Max daily loss limit reached" if halt else "Within safe risk boundaries",
         }
