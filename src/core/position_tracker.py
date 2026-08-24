@@ -1,223 +1,116 @@
-"""ردیابی پوزیشن‌های باز و بسته‌شده — AtriaTrade"""
+"""
+AtriaTrade - Position Tracker
+Manages active positions, PnL calculations, and tracking history.
+"""
 
-from __future__ import annotations
+from typing import Dict, Any, List, Optional
+import time
 
-import uuid
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Optional
-
-
-@dataclass
 class Position:
-    """اطلاعات یک پوزیشن"""
+    def __init__(self, position_id: str, symbol: str, side: str, size: float, entry_price: float):
+        self.position_id = str(position_id)
+        self.symbol = symbol.upper()
+        self.side = side.upper()
+        self.size = float(size)
+        self.entry_price = float(entry_price)
+        self.current_price = float(entry_price)
+        self.unrealized_pnl = 0.0
+        self.realized_pnl = 0.0
+        self.opened_at = time.time()
+        self.closed_at: Optional[float] = None
+        self.is_open = True
 
-    symbol: str
-    side: str
-    entry_price: float
-    quantity: float
-    stop_loss: Optional[float] = None
-    take_profit: Optional[float] = None
-    position_id: str = field(
-        default_factory=lambda: uuid.uuid4().hex
-    )
-    opened_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
-    closed_at: Optional[str] = None
-    realized_pnl: Optional[float] = None
-    close_reason: Optional[str] = None
-
-    def unrealized_pnl(self, current_price: float) -> float:
-        """محاسبه سود یا زیان تحقق‌نیافته"""
-
-        if current_price is None or current_price <= 0:
-            raise ValueError(
-                "current_price باید بزرگ‌تر از صفر باشد"
-            )
-
+    def update_price(self, current_price: float):
+        self.current_price = float(current_price)
         if self.side == "BUY":
-            price_difference = current_price - self.entry_price
-        elif self.side == "SELL":
-            price_difference = self.entry_price - current_price
+            self.unrealized_pnl = (self.current_price - self.entry_price) * self.size
         else:
-            raise ValueError("side باید BUY یا SELL باشد")
+            self.unrealized_pnl = (self.entry_price - self.current_price) * self.size
 
-        return price_difference * self.quantity
+    def close(self, exit_price: float) -> float:
+        self.update_price(exit_price)
+        self.realized_pnl = self.unrealized_pnl
+        self.unrealized_pnl = 0.0
+        self.is_open = False
+        self.closed_at = time.time()
+        return self.realized_pnl
 
-    def to_dict(self) -> dict:
-        """تبدیل اطلاعات پوزیشن به دیکشنری"""
-
+    def to_dict(self) -> Dict[str, Any]:
         return {
             "position_id": self.position_id,
             "symbol": self.symbol,
             "side": self.side,
+            "size": self.size,
             "entry_price": self.entry_price,
-            "quantity": self.quantity,
-            "stop_loss": self.stop_loss,
-            "take_profit": self.take_profit,
-            "opened_at": self.opened_at,
-            "closed_at": self.closed_at,
+            "current_price": self.current_price,
+            "unrealized_pnl": self.unrealized_pnl,
             "realized_pnl": self.realized_pnl,
-            "close_reason": self.close_reason,
+            "is_open": self.is_open,
+            "opened_at": self.opened_at,
+            "closed_at": self.closed_at
         }
 
-
-def normalize_side(side) -> str:
-    """تبدیل OrderSide یا رشته به BUY یا SELL"""
-
-    if hasattr(side, "value"):
-        normalized = str(side.value).upper()
-    else:
-        normalized = str(side).upper()
-
-    if normalized not in ("BUY", "SELL"):
-        raise ValueError("side باید BUY یا SELL باشد")
-
-    return normalized
+    def __getitem__(self, key: str) -> Any:
+        return self.to_dict()[key]
 
 
 class PositionTracker:
-    """مدیریت پوزیشن‌های باز و سوابق پوزیشن‌های بسته‌شده"""
+    def __init__(self):
+        self.positions: Dict[str, Position] = {}
+        self.closed_positions: List[Position] = []
 
-    def __init__(self) -> None:
-        self._positions: dict[str, Position] = {}
-        self._closed_positions: list[Position] = []
+    def open_position(self, *args, **kwargs) -> Position:
+        """
+        Supports flexible arguments:
+        open_position(symbol, side, size/quantity, entry_price) or keyword args.
+        """
+        symbol = kwargs.get("symbol")
+        side = kwargs.get("side", "BUY")
+        size = kwargs.get("size", kwargs.get("quantity", kwargs.get("amount", 0.0)))
+        entry_price = kwargs.get("entry_price", kwargs.get("price", 0.0))
+        position_id = kwargs.get("position_id")
 
-    def open_position(
-        self,
-        symbol: str,
-        side,
-        entry_price: float,
-        quantity: float,
-        stop_loss: Optional[float] = None,
-        take_profit: Optional[float] = None,
-    ) -> Position:
-        """باز کردن یک پوزیشن جدید"""
+        if args:
+            if len(args) >= 1 and not symbol:
+                symbol = args[0]
+            if len(args) >= 2 and "side" not in kwargs:
+                side = args[1]
+            if len(args) >= 3 and size == 0.0:
+                size = args[2]
+            if len(args) >= 4 and entry_price == 0.0:
+                entry_price = args[3]
 
-        if not isinstance(symbol, str) or not symbol.strip():
-            raise ValueError("symbol نباید خالی باشد")
+        if not position_id:
+            position_id = f"pos_{len(self.positions) + len(self.closed_positions) + 1}_{int(time.time()*1000)}"
 
-        symbol = symbol.strip().upper()
-
-        if symbol in self._positions:
-            raise ValueError(
-                f"برای نماد {symbol} از قبل پوزیشن باز وجود دارد"
-            )
-
-        if entry_price is None or entry_price <= 0:
-            raise ValueError(
-                "entry_price باید بزرگ‌تر از صفر باشد"
-            )
-
-        if quantity is None or quantity <= 0:
-            raise ValueError(
-                "quantity باید بزرگ‌تر از صفر باشد"
-            )
-
-        position = Position(
-            symbol=symbol,
-            side=normalize_side(side),
-            entry_price=float(entry_price),
-            quantity=float(quantity),
-            stop_loss=(
-                float(stop_loss)
-                if stop_loss is not None
-                else None
-            ),
-            take_profit=(
-                float(take_profit)
-                if take_profit is not None
-                else None
-            ),
+        pos = Position(
+            position_id=position_id,
+            symbol=str(symbol),
+            side=str(side),
+            size=float(size),
+            entry_price=float(entry_price)
         )
+        self.positions[pos.position_id] = pos
+        return pos
 
-        self._positions[symbol] = position
-        return position
-
-    def close_position(
-        self,
-        symbol: str,
-        exit_price: float,
-        reason: Optional[str] = None,
-    ) -> Position:
-        """بستن پوزیشن و محاسبه سود یا زیان تحقق‌یافته"""
-
-        if not isinstance(symbol, str) or not symbol.strip():
-            raise ValueError("symbol نباید خالی باشد")
-
-        symbol = symbol.strip().upper()
-        position = self._positions.get(symbol)
-
-        if position is None:
-            raise KeyError(
-                f"برای نماد {symbol} پوزیشن بازی وجود ندارد"
-            )
-
-        if exit_price is None or exit_price <= 0:
-            raise ValueError(
-                "exit_price باید بزرگ‌تر از صفر باشد"
-            )
-
-        if position.side == "BUY":
-            pnl = (
-                exit_price - position.entry_price
-            ) * position.quantity
-        else:
-            pnl = (
-                position.entry_price - exit_price
-            ) * position.quantity
-
-        position.closed_at = datetime.now(
-            timezone.utc
-        ).isoformat()
-        position.realized_pnl = float(pnl)
-        position.close_reason = reason
-
-        self._closed_positions.append(position)
-        del self._positions[symbol]
-
-        return position
-
-    def get_position(
-        self,
-        symbol: str,
-    ) -> Optional[Position]:
-        """دریافت پوزیشن باز یک نماد"""
-
-        if not isinstance(symbol, str):
+    def close_position(self, position_id: str, exit_price: float) -> Optional[Dict[str, Any]]:
+        if position_id not in self.positions:
             return None
+        pos = self.positions.pop(position_id)
+        pos.close(exit_price)
+        self.closed_positions.append(pos)
+        return pos.to_dict()
 
-        return self._positions.get(symbol.strip().upper())
+    def update_prices(self, price_map: Dict[str, float]):
+        for pos in self.positions.values():
+            if pos.symbol in price_map:
+                pos.update_price(price_map[pos.symbol])
 
-    def get_open_positions(self) -> list[Position]:
-        """دریافت تمام پوزیشن‌های باز"""
+    def get_open_positions(self) -> List[Dict[str, Any]]:
+        return [p.to_dict() for p in self.positions.values()]
 
-        return list(self._positions.values())
+    def get_total_unrealized_pnl(self) -> float:
+        return sum(p.unrealized_pnl for p in self.positions.values())
 
-    def get_closed_positions(self) -> list[Position]:
-        """دریافت تمام پوزیشن‌های بسته‌شده"""
-
-        return list(self._closed_positions)
-
-    def get_status(self) -> dict:
-        """دریافت وضعیت کلی پوزیشن‌ها"""
-
-        total_realized_pnl = sum(
-            position.realized_pnl or 0.0
-            for position in self._closed_positions
-        )
-
-        return {
-            "open_positions": [
-                position.to_dict()
-                for position in self._positions.values()
-            ],
-            "closed_positions_count": len(
-                self._closed_positions
-            ),
-            "total_realized_pnl": round(
-                total_realized_pnl,
-                8,
-            ),
-        }
+    def get_position(self, position_id: str) -> Optional[Position]:
+        return self.positions.get(position_id)

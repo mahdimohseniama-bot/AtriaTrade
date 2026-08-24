@@ -1,35 +1,49 @@
-# Python
-__pycache__/
-*.py[cod]
-*.so
-.venv/
-venv/
 
+!.env.example
+!backups/.gitkeep
+!logs/.gitkeep
+# Local databases, logs and generated files
+# OS / editor
+# Python
+# Python and local runtime files
+# Runtime data
 # Secrets - NEVER upload these
+# Secrets and local credentials
+# Termux temporary files
+*.db
+*.key
+*.log
+*.pem
+*.py[cod]
+*.pyc
+*.so
+*.sqlite
+*.sqlite3
+*.tmp
+*credential*
+*secret*
+*token*
+.DS_Store
 .env
 .env.*
-!.env.example
-*.pem
-*.key
-secrets/
-config/settings.json
-
-# Runtime data
-data/*.db
-data/*.sqlite
-data/*.csv
-data/*.json
-logs/*
-!logs/.gitkeep
-backups/*
-!backups/.gitkeep
-
-# OS / editor
-.DS_Store
-.vscode/
 .idea/
-
-# Termux temporary files
-*.tmp
-
+.pytest_cache/
+.venv/
+.vscode/
+__pycache__/
+backups/*
+config/settings.json
 data/
+data/*.csv
+data/*.db
+data/*.json
+data/*.sqlite
+logs/
+logs/*
+secrets/
+venv/
+fix_*.py
+*.backup_*
+*.before_*
+*.tar.gz
+audit_*/

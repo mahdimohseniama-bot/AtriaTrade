@@ -1,123 +1,102 @@
 """
-PortfolioManager - AtriaTrade
-
-Manages cash allocation, position records, equity calculations, and drawdown metrics.
-Designed strictly for Paper Trading, Backtesting, and Testnet simulation.
+AtriaTrade - Portfolio Manager
+Manages portfolio balances, holdings, asset allocation, and trade recording.
 """
 
-from __future__ import annotations
-
-from typing import Any, Dict, Optional
-
+from typing import Dict, Any, Optional
 
 class PortfolioManager:
-    """Portfolio state and allocation tracker."""
+    def __init__(self, initial_balance: float = 10000.0):
+        self.initial_balance = float(initial_balance)
+        self.cash = float(initial_balance)
+        self.holdings: Dict[str, float] = {}
+        self.history: list = []
 
-    def __init__(
-        self,
-        initial_cash: float = 10000.0,
-        max_asset_weight: float = 0.3,
-        rebalance_threshold: float = 0.05,
-    ) -> None:
-        self.initial_cash = float(initial_cash)
-        self.cash = float(initial_cash)
-        self.max_asset_weight = float(max_asset_weight)
-        self.rebalance_threshold = float(rebalance_threshold)
+    @property
+    def balance(self) -> float:
+        return self.cash
 
-        # positions: {symbol: {"quantity": float, "avg_entry_price": float}}
-        self.positions: Dict[str, Dict[str, float]] = {}
-        self.peak_equity = float(initial_cash)
+    def can_allocate(self, *args, **kwargs) -> bool:
+        """
+        Supports:
+        can_allocate(symbol, amount)
+        can_allocate(symbol, quantity, price)
+        can_allocate(cost)
+        or keyword arguments.
+        """
+        cost = 0.0
+        if len(args) == 1:
+            cost = float(args[0])
+        elif len(args) == 2:
+            cost = float(args[1])
+        elif len(args) >= 3:
+            cost = float(args[1]) * float(args[2])
+        else:
+            if "cost" in kwargs:
+                cost = float(kwargs["cost"])
+            elif "quantity" in kwargs and "price" in kwargs:
+                cost = float(kwargs["quantity"]) * float(kwargs["price"])
+            elif "amount" in kwargs:
+                cost = float(kwargs["amount"])
 
-    def can_allocate(self, symbol: str, required_amount: float) -> bool:
-        """Check if capital allocation satisfies cash balance constraints."""
-        amount = float(required_amount)
-        if amount <= 0:
-            return False
-        return self.cash >= amount
+        return self.cash >= cost
 
-    def record_buy(self, symbol: str, quantity: float, price: float, fee: float = 0.0) -> None:
-        """Record buy execution and deduct cash."""
-        sym = str(symbol).strip().upper()
-        qty = float(quantity)
-        px = float(price)
-        total_cost = (qty * px) + float(fee)
+    def record_buy(self, symbol: str, quantity: float, price: float, fee: float = 0.0) -> Dict[str, Any]:
+        total_cost = (float(quantity) * float(price)) + float(fee)
+        sym = symbol.upper()
+        if self.cash < total_cost:
+            return {"status": "FAILED", "reason": "Insufficient funds", "total_cost": total_cost}
 
         self.cash -= total_cost
+        self.holdings[sym] = self.holdings.get(sym, 0.0) + float(quantity)
+        record = {
+            "action": "BUY",
+            "symbol": sym,
+            "quantity": float(quantity),
+            "price": float(price),
+            "fee": float(fee),
+            "total_cost": total_cost,
+            "remaining_cash": self.cash
+        }
+        self.history.append(record)
+        return record
 
-        if sym not in self.positions:
-            self.positions[sym] = {"quantity": qty, "avg_entry_price": px}
-        else:
-            current_qty = self.positions[sym]["quantity"]
-            current_avg = self.positions[sym]["avg_entry_price"]
-            new_qty = current_qty + qty
-            if new_qty > 0:
-                new_avg = ((current_qty * current_avg) + (qty * px)) / new_qty
-            else:
-                new_avg = px
-            self.positions[sym] = {"quantity": new_qty, "avg_entry_price": new_avg}
-
-    def record_sell(self, symbol: str, quantity: float, price: float, fee: float = 0.0) -> None:
-        """Record sell execution and add cash proceeds."""
-        sym = str(symbol).strip().upper()
+    def record_sell(self, symbol: str, quantity: float, price: float, fee: float = 0.0) -> Dict[str, Any]:
+        sym = symbol.upper()
+        current_holding = self.holdings.get(sym, 0.0)
         qty = float(quantity)
-        px = float(price)
-        proceeds = (qty * px) - float(fee)
+        if current_holding < qty:
+            return {"status": "FAILED", "reason": "Insufficient holdings", "holding": current_holding}
 
-        self.cash += proceeds
+        total_proceeds = (qty * float(price)) - float(fee)
+        self.holdings[sym] = current_holding - qty
+        if self.holdings[sym] <= 0:
+            del self.holdings[sym]
+        self.cash += total_proceeds
+        record = {
+            "action": "SELL",
+            "symbol": sym,
+            "quantity": qty,
+            "price": float(price),
+            "fee": float(fee),
+            "total_proceeds": total_proceeds,
+            "remaining_cash": self.cash
+        }
+        self.history.append(record)
+        return record
 
-        if sym in self.positions:
-            remaining_qty = self.positions[sym]["quantity"] - qty
-            if remaining_qty <= 1e-8:
-                del self.positions[sym]
-            else:
-                self.positions[sym]["quantity"] = remaining_qty
+    def get_total_value(self, price_map: Optional[Dict[str, float]] = None) -> float:
+        price_map = price_map or {}
+        assets_val = 0.0
+        for sym, qty in self.holdings.items():
+            assets_val += qty * price_map.get(sym, 0.0)
+        return self.cash + assets_val
 
-    def get_holding_quantity(self, symbol: str) -> float:
-        """Get quantity held for a given symbol."""
-        sym = str(symbol).strip().upper()
-        return self.positions.get(sym, {}).get("quantity", 0.0)
-
-    def calculate_total_equity(self, current_prices: Optional[Dict[str, float]] = None) -> float:
-        """Calculate total portfolio equity given latest asset prices."""
-        prices = current_prices or {}
-        positions_val = 0.0
-        for sym, pos in self.positions.items():
-            price = float(prices.get(sym, pos["avg_entry_price"]))
-            positions_val += pos["quantity"] * price
-
-        equity = self.cash + positions_val
-        if equity > self.peak_equity:
-            self.peak_equity = equity
-        return equity
-
-    def calculate_drawdown(self, current_equity: Optional[float] = None) -> float:
-        """
-        Calculate percentage drawdown from peak equity.
-        If current_equity is not provided, computes from existing known state.
-        """
-        if current_equity is None:
-            eq = self.calculate_total_equity()
-        else:
-            eq = float(current_equity)
-
-        if eq > self.peak_equity:
-            self.peak_equity = eq
-
-        if self.peak_equity <= 0:
-            return 0.0
-
-        dd_pct = ((self.peak_equity - eq) / self.peak_equity) * 100.0
-        return max(0.0, dd_pct)
-
-    def get_summary(self, current_prices: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
-        """Summary of current portfolio status."""
-        equity = self.calculate_total_equity(current_prices)
-        drawdown = self.calculate_drawdown(equity)
+    def get_portfolio_summary(self, price_map: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
+        total_val = self.get_total_value(price_map)
         return {
             "cash": self.cash,
-            "equity": equity,
-            "peak_equity": self.peak_equity,
-            "drawdown_pct": drawdown,
-            "positions_count": len(self.positions),
-            "positions": dict(self.positions),
+            "holdings": self.holdings.copy(),
+            "total_value": total_val,
+            "unrealized_profit": total_val - self.initial_balance
         }
