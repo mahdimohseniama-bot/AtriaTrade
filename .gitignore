@@ -47,3 +47,4 @@ fix_*.py
 *.before_*
 *.tar.gz
 audit_*/
+.env
