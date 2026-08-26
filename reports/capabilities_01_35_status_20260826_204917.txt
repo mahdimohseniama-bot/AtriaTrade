@@ -1,0 +1,32 @@
+timestamp_utc=2026-08-26T17:19:18.809273+00:00
+branch=main
+head_before_commit=71c026b
+
+[git_status_before_commit]
+ M src/core/integrated_pipeline.py
+ M src/core/order_executor.py
+ M src/core/order_manager.py
+ M src/core/paper_session.py
+ M src/core/portfolio_manager.py
+ M src/core/position_tracker.py
+ M src/core/risk_manager.py
+?? .compat_patch_backup_20260826_145828/
+?? apply_final_compat_patch.py
+?? atria_exact_api_report.txt
+?? atria_final_diagnostic.txt
+?? atria_final_fix.py
+?? atria_patch_runtime.py
+?? finalize_capabilities_01_35.py
+?? repair_7_baseline_safe.py
+?? repair_7_failures.py
+?? src/analysis/
+?? tests/test_candle_validator.py
+?? tests/test_data_feed.py
+?? tests/test_indicator_engine.py
+?? tests/test_market_fetcher.py
+?? tests/test_signal_generator.py
+
+
+[git_remotes]
+origin	https://github.com/mahdimohseniama-bot/AtriaTrade.git (fetch)
+origin	https://github.com/mahdimohseniama-bot/AtriaTrade.git (push)

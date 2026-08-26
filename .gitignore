@@ -48,3 +48,6 @@ fix_*.py
 *.tar.gz
 audit_*/
 .env
+
+# Local/generated/sensitive files
+*.pyo
