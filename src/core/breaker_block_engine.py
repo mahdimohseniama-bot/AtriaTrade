@@ -1,107 +1,150 @@
 """
-SMC Breaker Block & Mitigation Engine (Capability 87)
-Identifies failed/violated Order Blocks that flip polarity (Breaker Blocks)
-and tests for retest/mitigation signals.
+Multi-Timeframe Fractal Breaker Block Engine (Capability 92)
+Identifies failed order blocks transformed into institutional breaker blocks (support-to-resistance / resistance-to-support flip zones)
+following liquidity sweeps.
 """
+from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
-from typing import Dict, Any, Optional
 
 @dataclass
-class BreakerSignal:
-    detected: bool
-    block_type: str  # "BULLISH_BREAKER", "BEARISH_BREAKER", "MITIGATION"
-    zone_high: float
-    zone_low: float
-    entry_price: float
-    suggested_stop_loss: float
-    reason: str
+class BreakerBlock:
+    breaker_id: str
+    symbol: str
+    timeframe: str
+    breaker_type: str  # BULLISH_BREAKER or BEARISH_BREAKER
+    top_price: float
+    bottom_price: float
+    sweep_high_or_low: float
+    is_mitigated: bool = False
+    mitigation_count: int = 0
+    status: str = "ACTIVE"  # ACTIVE, MITIGATED, INVALIDATED
 
 class BreakerBlockEngine:
-    def __init__(self, tolerance_pct: float = 0.0015):
+    def __init__(self, max_mitigations: int = 2):
         """
-        :param tolerance_pct: Proximity buffer to consider price inside the breaker zone
+        :param max_mitigations: Maximum number of retests before breaker block is considered exhausted/mitigated.
         """
-        self.tolerance_pct = tolerance_pct
+        self.max_mitigations = max_mitigations
+        self.breakers: List[BreakerBlock] = []
 
-    def detect_breaker(
+    def identify_bullish_breaker(
         self,
-        current_candle: Dict[str, float],
-        broken_order_block: Dict[str, Any],
-        market_structure: str = "BULLISH"
-    ) -> BreakerSignal:
+        symbol: str,
+        timeframe: str,
+        failed_ob_high: float,
+        failed_ob_low: float,
+        liquidity_sweep_low: float,
+        breakout_price: float
+    ) -> Optional[BreakerBlock]:
         """
-        Detects if current price action mitigates or reacts to a broken Order Block (Breaker).
-        broken_order_block format:
-        {
-            "original_type": "BEARISH_OB" or "BULLISH_OB",
-            "high": float,
-            "low": float
-        }
+        Bullish Breaker:
+        Price sweeps previous low (Stop hunt), then strongly breaks above the previous down-candle (failed Bearish OB).
+        Now this failed OB zone becomes strong Bullish Support on retest.
         """
-        high = current_candle.get("high", 0.0)
-        low = current_candle.get("low", 0.0)
-        close = current_candle.get("close", 0.0)
+        if failed_ob_high <= failed_ob_low or liquidity_sweep_low >= failed_ob_low:
+            return None
 
-        if high <= low or not broken_order_block:
-            return BreakerSignal(
-                detected=False,
-                block_type="NONE",
-                zone_high=0.0,
-                zone_low=0.0,
-                entry_price=0.0,
-                suggested_stop_loss=0.0,
-                reason="Invalid candle or empty order block"
-            )
+        # Confirmed only if price broke strongly above the failed OB high
+        if breakout_price <= failed_ob_high:
+            return None
 
-        ob_high = float(broken_order_block.get("high", 0.0))
-        ob_low = float(broken_order_block.get("low", 0.0))
-        orig_type = broken_order_block.get("original_type", "")
-
-        if ob_high <= ob_low:
-            return BreakerSignal(
-                detected=False,
-                block_type="NONE",
-                zone_high=0.0,
-                zone_low=0.0,
-                entry_price=0.0,
-                suggested_stop_loss=0.0,
-                reason="Invalid block bounds"
-            )
-
-        # Bullish Breaker: An old Bearish OB was broken upwards, now acts as Support
-        if orig_type == "BEARISH_OB" and market_structure.upper() == "BULLISH":
-            # Price retraces down into old OB zone [ob_low * (1-tol), ob_high * (1+tol)]
-            if low <= ob_high * (1 + self.tolerance_pct) and close >= ob_low * (1 - self.tolerance_pct):
-                return BreakerSignal(
-                    detected=True,
-                    block_type="BULLISH_BREAKER",
-                    zone_high=ob_high,
-                    zone_low=ob_low,
-                    entry_price=close,
-                    suggested_stop_loss=ob_low * (1 - self.tolerance_pct),
-                    reason="Retest of violated bearish OB as bullish breaker support"
-                )
-
-        # Bearish Breaker: An old Bullish OB was broken downwards, now acts as Resistance
-        elif orig_type == "BULLISH_OB" and market_structure.upper() == "BEARISH":
-            # Price retraces up into old OB zone
-            if high >= ob_low * (1 - self.tolerance_pct) and close <= ob_high * (1 + self.tolerance_pct):
-                return BreakerSignal(
-                    detected=True,
-                    block_type="BEARISH_BREAKER",
-                    zone_high=ob_high,
-                    zone_low=ob_low,
-                    entry_price=close,
-                    suggested_stop_loss=ob_high * (1 + self.tolerance_pct),
-                    reason="Retest of violated bullish OB as bearish breaker resistance"
-                )
-
-        return BreakerSignal(
-            detected=False,
-            block_type="NONE",
-            zone_high=ob_high,
-            zone_low=ob_low,
-            entry_price=0.0,
-            suggested_stop_loss=0.0,
-            reason="Price not mitigating breaker block zone"
+        breaker_id = f"BRK_BULL_{symbol}_{timeframe}_{len(self.breakers) + 1}"
+        breaker = BreakerBlock(
+            breaker_id=breaker_id,
+            symbol=symbol,
+            timeframe=timeframe,
+            breaker_type="BULLISH_BREAKER",
+            top_price=round(failed_ob_high, 4),
+            bottom_price=round(failed_ob_low, 4),
+            sweep_high_or_low=round(liquidity_sweep_low, 4),
+            is_mitigated=False,
+            mitigation_count=0,
+            status="ACTIVE"
         )
+        self.breakers.append(breaker)
+        return breaker
+
+    def identify_bearish_breaker(
+        self,
+        symbol: str,
+        timeframe: str,
+        failed_ob_high: float,
+        failed_ob_low: float,
+        liquidity_sweep_high: float,
+        breakout_price: float
+    ) -> Optional[BreakerBlock]:
+        """
+        Bearish Breaker:
+        Price sweeps previous high (Stop hunt), then strongly breaks below the previous up-candle (failed Bullish OB).
+        Now this failed OB zone becomes strong Bearish Resistance on retest.
+        """
+        if failed_ob_high <= failed_ob_low or liquidity_sweep_high <= failed_ob_high:
+            return None
+
+        # Confirmed only if price broke strongly below the failed OB low
+        if breakout_price >= failed_ob_low:
+            return None
+
+        breaker_id = f"BRK_BEAR_{symbol}_{timeframe}_{len(self.breakers) + 1}"
+        breaker = BreakerBlock(
+            breaker_id=breaker_id,
+            symbol=symbol,
+            timeframe=timeframe,
+            breaker_type="BEARISH_BREAKER",
+            top_price=round(failed_ob_high, 4),
+            bottom_price=round(failed_ob_low, 4),
+            sweep_high_or_low=round(liquidity_sweep_high, 4),
+            is_mitigated=False,
+            mitigation_count=0,
+            status="ACTIVE"
+        )
+        self.breakers.append(breaker)
+        return breaker
+
+    def evaluate_retest(self, breaker: BreakerBlock, test_price: float) -> BreakerBlock:
+        """
+        Checks if current price is testing/mitigating or invalidating the breaker block.
+        """
+        if breaker.status != "ACTIVE":
+            return breaker
+
+        if breaker.breaker_type == "BULLISH_BREAKER":
+            # Invalidated if price breaks cleanly below bottom of bullish breaker
+            if test_price < breaker.bottom_price:
+                breaker.status = "INVALIDATED"
+            # Retest / Mitigation zone
+            elif breaker.bottom_price <= test_price <= breaker.top_price:
+                breaker.mitigation_count += 1
+                if breaker.mitigation_count >= self.max_mitigations:
+                    breaker.is_mitigated = True
+                    breaker.status = "MITIGATED"
+        else:  # BEARISH_BREAKER
+            # Invalidated if price breaks cleanly above top of bearish breaker
+            if test_price > breaker.top_price:
+                breaker.status = "INVALIDATED"
+            # Retest / Mitigation zone
+            elif breaker.bottom_price <= test_price <= breaker.top_price:
+                breaker.mitigation_count += 1
+                if breaker.mitigation_count >= self.max_mitigations:
+                    breaker.is_mitigated = True
+                    breaker.status = "MITIGATED"
+
+        return breaker
+
+    def get_active_breakers(self, symbol: str, timeframe: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Returns active actionable breaker blocks.
+        """
+        results = []
+        for b in self.breakers:
+            if b.symbol == symbol and b.status == "ACTIVE":
+                if timeframe is None or b.timeframe == timeframe:
+                    results.append({
+                        "breaker_id": b.breaker_id,
+                        "timeframe": b.timeframe,
+                        "type": b.breaker_type,
+                        "zone_top": b.top_price,
+                        "zone_bottom": b.bottom_price,
+                        "mitigations": b.mitigation_count
+                    })
+        return results

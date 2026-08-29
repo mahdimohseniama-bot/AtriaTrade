@@ -1,107 +1,101 @@
 """
-Optimal Trade Entry (OTE) and Fibonacci Confluence Engine for AtriaTrade (Capability 72).
-Calculates key Fibonacci retracement levels (0.618, 0.705, 0.786) and evaluates OTE zones.
+Optimal Trade Entry (OTE) & ICT Fibonacci Level Engine (Capability 94)
+Calculates Equilibrium, Premium/Discount zones, OTE levels (0.618, 0.705, 0.786),
+and extension profit targets based on swing ranges.
 """
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Dict, Any, Optional
 
 
-class TrendDirection(str, Enum):
-    BULLISH = "BULLISH"
-    BEARISH = "BEARISH"
+class MarketZone(str, Enum):
+    PREMIUM = "PREMIUM"        # Price > 0.5 Equilibrium
+    EQUILIBRIUM = "EQUILIBRIUM"  # Price == 0.5
+    DISCOUNT = "DISCOUNT"      # Price < 0.5 Equilibrium
 
 
-@dataclass(frozen=True)
-class OTEZone:
-    direction: TrendDirection
-    swing_low: float
+class TradeDirection(str, Enum):
+    LONG = "LONG"
+    SHORT = "SHORT"
+
+
+@dataclass
+class OTEProfile:
     swing_high: float
-    fib_618: float
-    fib_705: float
-    fib_786: float
-    optimal_entry: float  # Key sweet spot (70.5%)
-    stop_loss_level: float
-    take_profit_level: float
+    swing_low: float
+    direction: TradeDirection
+    equilibrium: float          # 50.0%
+    ote_618: float              # 61.8%
+    ote_705: float              # 70.5% (Sweet spot)
+    ote_786: float              # 78.6%
+    target_ext_27: float        # -27.0% Extension
+    target_ext_62: float        # -62.0% Extension
 
 
 class OTEEngine:
     """
-    Computes SMC Optimal Trade Entry zones and Fibonacci levels.
+    Computes ICT Optimal Trade Entry levels and evaluates current price zone.
     """
 
-    def __init__(self, sweet_spot_fib: float = 0.705):
-        if not (0.0 < sweet_spot_fib < 1.0):
-            raise ValueError("sweet_spot_fib باید مقداری بین ۰ و ۱ باشد")
-        self.sweet_spot_fib = sweet_spot_fib
+    def __init__(self, sweet_spot: float = 0.705):
+        self.sweet_spot = sweet_spot
 
-    def calculate_retracement_levels(self, swing_low: float, swing_high: float, direction: TrendDirection) -> Dict[str, float]:
+    def calculate_ote(self, swing_low: float, swing_high: float, direction: TradeDirection) -> OTEProfile:
         """
-        محاسبه ترازهای استاندارد فیبوناچی
+        Calculates OTE levels based on swing extremes and trade direction.
         """
-        if swing_low >= swing_high:
-            raise ValueError("swing_low باید اکیداً کوچکتر از swing_high باشد")
+        if swing_high <= swing_low:
+            raise ValueError("swing_high must be strictly greater than swing_low")
 
         diff = swing_high - swing_low
+        eq = swing_low + 0.5 * diff
 
-        if direction == TrendDirection.BULLISH:
-            # در روند صعودی: قیمت از سقف به سمت کف اصلاح می‌کند
-            return {
-                "0.0": round(swing_high, 4),
-                "0.382": round(swing_high - 0.382 * diff, 4),
-                "0.500": round(swing_high - 0.500 * diff, 4),
-                "0.618": round(swing_high - 0.618 * diff, 4),
-                "0.705": round(swing_high - 0.705 * diff, 4),
-                "0.786": round(swing_high - 0.786 * diff, 4),
-                "1.0": round(swing_low, 4),
-            }
+        if direction == TradeDirection.LONG:
+            # Retracement down from high into discount OTE
+            ote_618 = swing_high - (0.618 * diff)
+            ote_705 = swing_high - (self.sweet_spot * diff)
+            ote_786 = swing_high - (0.786 * diff)
+            ext_27 = swing_high + (0.27 * diff)
+            ext_62 = swing_high + (0.62 * diff)
         else:
-            # در روند نزولی: قیمت از کف به سمت سقف اصلاح می‌کند (رالی صعودی موقت)
-            return {
-                "0.0": round(swing_low, 4),
-                "0.382": round(swing_low + 0.382 * diff, 4),
-                "0.500": round(swing_low + 0.500 * diff, 4),
-                "0.618": round(swing_low + 0.618 * diff, 4),
-                "0.705": round(swing_low + 0.705 * diff, 4),
-                "0.786": round(swing_low + 0.786 * diff, 4),
-                "1.0": round(swing_high, 4),
-            }
+            # Retracement up from low into premium OTE
+            ote_618 = swing_low + (0.618 * diff)
+            ote_705 = swing_low + (self.sweet_spot * diff)
+            ote_786 = swing_low + (0.786 * diff)
+            ext_27 = swing_low - (0.27 * diff)
+            ext_62 = swing_low - (0.62 * diff)
 
-    def generate_ote_zone(self, swing_low: float, swing_high: float, direction: TrendDirection) -> OTEZone:
-        """
-        تولید محدوده ورود OTE همراه با حد سود و حد ضرر پیشنهادی اسمارت‌مانی
-        """
-        levels = self.calculate_retracement_levels(swing_low, swing_high, direction)
-
-        if direction == TrendDirection.BULLISH:
-            sl = round(swing_low * 0.998, 4)  # کمی پایین‌تر از سوئینگ کف
-            tp = round(swing_high, 4)         # سقف قبلی به عنوان تارگت اول
-            sweet_entry = levels["0.705"]
-        else:
-            sl = round(swing_high * 1.002, 4) # کمی بالاتر از سوئینگ سقف
-            tp = round(swing_low, 4)          # کف قبلی به عنوان تارگت اول
-            sweet_entry = levels["0.705"]
-
-        return OTEZone(
+        return OTEProfile(
+            swing_high=float(swing_high),
+            swing_low=float(swing_low),
             direction=direction,
-            swing_low=swing_low,
-            swing_high=swing_high,
-            fib_618=levels["0.618"],
-            fib_705=levels["0.705"],
-            fib_786=levels["0.786"],
-            optimal_entry=sweet_entry,
-            stop_loss_level=sl,
-            take_profit_level=tp
+            equilibrium=round(eq, 6),
+            ote_618=round(ote_618, 6),
+            ote_705=round(ote_705, 6),
+            ote_786=round(ote_786, 6),
+            target_ext_27=round(ext_27, 6),
+            target_ext_62=round(ext_62, 6),
         )
 
-    def is_price_in_ote_zone(self, current_price: float, ote_zone: OTEZone) -> bool:
+    def get_market_zone(self, price: float, swing_low: float, swing_high: float) -> MarketZone:
         """
-        بررسی اینکه آیا قیمت فعلی در زون طلایی 61.8% تا 78.6% قرار دارد یا خیر.
+        Identifies whether current price is in Premium or Discount zone.
         """
-        if ote_zone.direction == TrendDirection.BULLISH:
-            # در روند صعودی زون بین fib_786 (پایین‌تر) و fib_618 (بالاتر) است
-            return ote_zone.fib_786 <= current_price <= ote_zone.fib_618
-        else:
-            # در روند نزولی زون بین fib_618 (پایین‌تر) و fib_786 (بالاتر) است
-            return ote_zone.fib_618 <= current_price <= ote_zone.fib_786
+        if swing_high <= swing_low:
+            raise ValueError("swing_high must be strictly greater than swing_low")
+
+        eq = (swing_high + swing_low) / 2.0
+        if price > eq:
+            return MarketZone.PREMIUM
+        elif price < eq:
+            return MarketZone.DISCOUNT
+        return MarketZone.EQUILIBRIUM
+
+    def is_in_ote_zone(self, price: float, profile: OTEProfile) -> bool:
+        """
+        Checks if the current price falls inside the OTE range [0.618 to 0.786].
+        """
+        low_bound = min(profile.ote_618, profile.ote_786)
+        high_bound = max(profile.ote_618, profile.ote_786)
+        return low_bound <= price <= high_bound
