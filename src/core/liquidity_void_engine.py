@@ -1,125 +1,116 @@
-"""
-Liquidity Void & Imbalance Rebalancing Engine (Capability 91)
-Tracks extreme price displacement gaps (Liquidity Voids), calculates rebalancing fill percentages,
-and determines optimal institutional magnet targets.
-"""
-from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
+from enum import Enum
+from typing import Optional, Dict, Any
+
+
+class VoidType(str, Enum):
+    BULLISH_VOID = "BULLISH_VOID"
+    BEARISH_VOID = "BEARISH_VOID"
+
+
+class VoidStatus(str, Enum):
+    ACTIVE = "ACTIVE"
+    PARTIALLY_FILLED = "PARTIALLY_FILLED"
+    FULLY_REBALANCED = "FULLY_REBALANCED"
+
 
 @dataclass
 class LiquidityVoid:
     void_id: str
-    symbol: str
-    direction: str  # BULLISH_DISPLACEMENT (void below) or BEARISH_DISPLACEMENT (void above)
+    void_type: VoidType
     top_price: float
     bottom_price: float
-    equilibrium_level: float
-    filled_ratio: float = 0.0
-    status: str = "OPEN"  # OPEN, PARTIALLY_FILLED, FULLY_FILLED
+    ce_price: float  # Consequent Encroachment (50% midpoint)
+    expansion_range: float
+    status: VoidStatus = VoidStatus.ACTIVE
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "void_id": self.void_id,
+            "void_type": self.void_type.value,
+            "top_price": self.top_price,
+            "bottom_price": self.bottom_price,
+            "ce_price": self.ce_price,
+            "expansion_range": self.expansion_range,
+            "status": self.status.value,
+        }
+
 
 class LiquidityVoidEngine:
-    def __init__(self, min_void_pct: float = 0.5):
-        """
-        :param min_void_pct: Minimum price range % to qualify as an institutional liquidity void
-        """
-        self.min_void_pct = min_void_pct
-        self.voids: List[LiquidityVoid] = []
+    def __init__(self, expansion_multiplier: float = 2.0):
+        if expansion_multiplier <= 1.0:
+            raise ValueError("expansion_multiplier must be greater than 1.0")
+        self.expansion_multiplier = expansion_multiplier
 
     def detect_void(
         self,
-        symbol: str,
-        candle_high: float,
-        candle_low: float,
-        next_candle_low: Optional[float] = None,
-        next_candle_high: Optional[float] = None,
-        candle_direction: str = "BULLISH"
+        open_price: float,
+        high_price: float,
+        low_price: float,
+        close_price: float,
+        avg_body_size: float,
+        void_id: str = "void_1"
     ) -> Optional[LiquidityVoid]:
-        """
-        Detects sudden expansion displacement leaving open void.
-        """
-        if candle_high <= candle_low or candle_low <= 0:
+        if high_price < low_price or avg_body_size <= 0:
+            raise ValueError("Invalid candle metrics or non-positive avg_body_size")
+
+        body_size = abs(close_price - open_price)
+        candle_range = high_price - low_price
+
+        # Must be an explosive displacement candle:
+        # 1. Body is greater than expansion threshold
+        # 2. Body dominates at least 70% of the entire range
+        if candle_range <= 0 or (body_size / candle_range) < 0.70:
             return None
 
-        candle_range_pct = ((candle_high - candle_low) / candle_low) * 100.0
-        if candle_range_pct < self.min_void_pct:
+        if body_size < (avg_body_size * self.expansion_multiplier):
             return None
 
-        # Determine void boundaries
-        if candle_direction.upper() == "BULLISH":
-            top = candle_high
-            bottom = candle_low if next_candle_low is None else min(candle_low, next_candle_low)
-            direction = "BULLISH_DISPLACEMENT"
+        if close_price > open_price:
+            v_type = VoidType.BULLISH_VOID
+            top = close_price
+            bottom = open_price
         else:
-            top = candle_high if next_candle_high is None else max(candle_high, next_candle_high)
-            bottom = candle_low
-            direction = "BEARISH_DISPLACEMENT"
+            v_type = VoidType.BEARISH_VOID
+            top = open_price
+            bottom = close_price
 
-        eq = round((top + bottom) / 2.0, 4)
-        void_id = f"VOID_{symbol}_{len(self.voids) + 1}"
+        ce = round((top + bottom) / 2.0, 4)
+        expansion_range = round(top - bottom, 4)
 
-        void = LiquidityVoid(
+        return LiquidityVoid(
             void_id=void_id,
-            symbol=symbol,
-            direction=direction,
-            top_price=round(top, 4),
-            bottom_price=round(bottom, 4),
-            equilibrium_level=eq,
-            filled_ratio=0.0,
-            status="OPEN"
+            void_type=v_type,
+            top_price=top,
+            bottom_price=bottom,
+            ce_price=ce,
+            expansion_range=expansion_range,
+            status=VoidStatus.ACTIVE
         )
-        self.voids.append(void)
-        return void
 
-    def update_rebalance_status(self, void: LiquidityVoid, current_price: float) -> LiquidityVoid:
-        """
-        Updates how much of the liquidity void has been filled/rebalanced.
-        """
-        if void.top_price <= void.bottom_price:
-            return void
+    def update_void_status(
+        self,
+        void: LiquidityVoid,
+        current_high: float,
+        current_low: float
+    ) -> VoidStatus:
+        if current_high < current_low:
+            raise ValueError("current_high cannot be less than current_low")
 
-        total_span = void.top_price - void.bottom_price
+        if void.status == VoidStatus.FULLY_REBALANCED:
+            return void.status
 
-        if void.direction == "BULLISH_DISPLACEMENT":
-            # Price pulls down into the void from top
-            if current_price >= void.top_price:
-                fill = 0.0
-            elif current_price <= void.bottom_price:
-                fill = 1.0
-            else:
-                fill = (void.top_price - current_price) / total_span
-        else:
-            # Price pulls up into the void from bottom
-            if current_price <= void.bottom_price:
-                fill = 0.0
-            elif current_price >= void.top_price:
-                fill = 1.0
-            else:
-                fill = (current_price - void.bottom_price) / total_span
+        if void.void_type == VoidType.BULLISH_VOID:
+            if current_low <= void.bottom_price:
+                void.status = VoidStatus.FULLY_REBALANCED
+            elif current_low <= void.ce_price:
+                if void.status == VoidStatus.ACTIVE:
+                    void.status = VoidStatus.PARTIALLY_FILLED
+        elif void.void_type == VoidType.BEARISH_VOID:
+            if current_high >= void.top_price:
+                void.status = VoidStatus.FULLY_REBALANCED
+            elif current_high >= void.ce_price:
+                if void.status == VoidStatus.ACTIVE:
+                    void.status = VoidStatus.PARTIALLY_FILLED
 
-        void.filled_ratio = max(0.0, min(1.0, round(fill, 4)))
-
-        if void.filled_ratio >= 1.0:
-            void.status = "FULLY_FILLED"
-        elif void.filled_ratio >= 0.5:
-            void.status = "PARTIALLY_FILLED"
-        else:
-            void.status = "OPEN"
-
-        return void
-
-    def get_active_targets(self, symbol: str) -> List[Dict[str, Any]]:
-        """
-        Returns active 50% rebalance and 100% full-fill magnet price targets.
-        """
-        targets = []
-        for v in self.voids:
-            if v.symbol == symbol and v.status != "FULLY_FILLED":
-                targets.append({
-                    "void_id": v.void_id,
-                    "direction": v.direction,
-                    "equilibrium_50pct": v.equilibrium_level,
-                    "full_fill_price": v.bottom_price if v.direction == "BULLISH_DISPLACEMENT" else v.top_price,
-                    "filled_ratio": v.filled_ratio,
-                    "status": v.status
-                })
-        return targets
+        return void.status

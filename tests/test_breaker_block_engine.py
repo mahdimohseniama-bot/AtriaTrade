@@ -1,100 +1,103 @@
-"""
-Unit tests for Multi-Timeframe Fractal Breaker Block Engine (Capability 92)
-"""
 import pytest
-from src.core.breaker_block_engine import BreakerBlockEngine, BreakerBlock
+from src.core.breaker_block_engine import BreakerBlockEngine, BlockRole
 
-def test_identify_bullish_breaker_success():
-    engine = BreakerBlockEngine(max_mitigations=2)
-    # Down-candle OB was 100-105. Price swept low to 95, then exploded above 105 to 110
-    breaker = engine.identify_bullish_breaker(
-        symbol="BTCUSDT",
-        timeframe="15m",
-        failed_ob_high=105.0,
-        failed_ob_low=100.0,
-        liquidity_sweep_low=95.0,
-        breakout_price=110.0
-    )
-    assert breaker is not None
-    assert breaker.breaker_type == "BULLISH_BREAKER"
-    assert breaker.status == "ACTIVE"
-    assert breaker.mitigation_count == 0
 
-def test_identify_bearish_breaker_success():
-    engine = BreakerBlockEngine(max_mitigations=2)
-    # Up-candle OB was 200-205. Price swept high to 210, then dumped below 200 to 195
-    breaker = engine.identify_bearish_breaker(
-        symbol="ETHUSDT",
-        timeframe="1h",
-        failed_ob_high=205.0,
-        failed_ob_low=200.0,
-        liquidity_sweep_high=210.0,
-        breakout_price=195.0
-    )
-    assert breaker is not None
-    assert breaker.breaker_type == "BEARISH_BREAKER"
-    assert breaker.status == "ACTIVE"
-
-def test_breaker_invalid_parameters():
+def test_bullish_ob_inverts_to_bearish_breaker():
     engine = BreakerBlockEngine()
-    # Breakout price didn't cross the OB
-    breaker = engine.identify_bullish_breaker(
-        symbol="BTCUSDT",
-        timeframe="15m",
-        failed_ob_high=105.0,
-        failed_ob_low=100.0,
-        liquidity_sweep_low=95.0,
-        breakout_price=103.0  # Not broken above 105
+    # Bullish OB [100-105] broken by close at 99.5 (below bottom)
+    res = engine.check_invalidation(
+        block_role=BlockRole.BULLISH_OB,
+        block_top=105.0,
+        block_bottom=100.0,
+        break_close=99.5
     )
-    assert breaker is None
+    assert res is not None
+    assert res.new_role == BlockRole.BEARISH_BREAKER
+    assert res.original_role == BlockRole.BULLISH_OB
+    assert res.mid_price == 102.5
 
-def test_breaker_retest_and_mitigation():
-    engine = BreakerBlockEngine(max_mitigations=2)
-    breaker = engine.identify_bullish_breaker(
-        symbol="BTCUSDT",
-        timeframe="15m",
-        failed_ob_high=105.0,
-        failed_ob_low=100.0,
-        liquidity_sweep_low=95.0,
-        breakout_price=110.0
-    )
-    assert breaker is not None
 
-    # First retest inside zone (102.0)
-    engine.evaluate_retest(breaker, test_price=102.0)
-    assert breaker.mitigation_count == 1
-    assert breaker.status == "ACTIVE"
-
-    # Second retest inside zone -> fully mitigated
-    engine.evaluate_retest(breaker, test_price=104.0)
-    assert breaker.mitigation_count == 2
-    assert breaker.status == "MITIGATED"
-    assert breaker.is_mitigated is True
-
-def test_breaker_invalidation():
+def test_bearish_ob_inverts_to_bullish_breaker():
     engine = BreakerBlockEngine()
-    breaker = engine.identify_bullish_breaker(
-        symbol="BTCUSDT",
-        timeframe="15m",
-        failed_ob_high=105.0,
-        failed_ob_low=100.0,
-        liquidity_sweep_low=95.0,
-        breakout_price=110.0
+    # Bearish OB [200-205] broken by close at 206 (above top)
+    res = engine.check_invalidation(
+        block_role=BlockRole.BEARISH_OB,
+        block_top=205.0,
+        block_bottom=200.0,
+        break_close=206.0
     )
-    assert breaker is not None
+    assert res is not None
+    assert res.new_role == BlockRole.BULLISH_BREAKER
+    assert res.mid_price == 202.5
 
-    # Price violently breaks below zone (98.0 < 100.0)
-    engine.evaluate_retest(breaker, test_price=98.0)
-    assert breaker.status == "INVALIDATED"
 
-def test_get_active_breakers_filtering():
+def test_bullish_ob_intact_no_breaker():
     engine = BreakerBlockEngine()
-    engine.identify_bullish_breaker("BTCUSDT", "15m", 105.0, 100.0, 95.0, 110.0)
-    engine.identify_bullish_breaker("ETHUSDT", "1h", 205.0, 200.0, 190.0, 215.0)
+    # Close inside the block (no break below bottom)
+    res = engine.check_invalidation(
+        block_role=BlockRole.BULLISH_OB,
+        block_top=105.0,
+        block_bottom=100.0,
+        break_close=102.0
+    )
+    assert res is None
 
-    btc_15m = engine.get_active_breakers(symbol="BTCUSDT", timeframe="15m")
-    assert len(btc_15m) == 1
-    assert btc_15m[0]["timeframe"] == "15m"
 
-    eth_15m = engine.get_active_breakers(symbol="ETHUSDT", timeframe="15m")
-    assert len(eth_15m) == 0
+def test_bearish_ob_intact_no_breaker():
+    engine = BreakerBlockEngine()
+    # Close inside the block (no break above top)
+    res = engine.check_invalidation(
+        block_role=BlockRole.BEARISH_OB,
+        block_top=205.0,
+        block_bottom=200.0,
+        break_close=203.0
+    )
+    assert res is None
+
+
+def test_min_close_beyond_threshold_blocks_weak_break():
+    engine = BreakerBlockEngine(min_close_beyond=1.0)
+    # Close at 99.8 is only 0.2 beyond bottom (100.0), threshold is 1.0 -> NOT broken
+    res = engine.check_invalidation(
+        block_role=BlockRole.BULLISH_OB,
+        block_top=105.0,
+        block_bottom=100.0,
+        break_close=99.8
+    )
+    assert res is None
+    # Close at 98.5 is 1.5 beyond bottom -> broken
+    res2 = engine.check_invalidation(
+        block_role=BlockRole.BULLISH_OB,
+        block_top=105.0,
+        block_bottom=100.0,
+        break_close=98.5
+    )
+    assert res2 is not None
+    assert res2.new_role == BlockRole.BEARISH_BREAKER
+
+
+def test_invalid_block_prices_raise_error():
+    engine = BreakerBlockEngine()
+    with pytest.raises(ValueError):
+        engine.check_invalidation(
+            block_role=BlockRole.BULLISH_OB,
+            block_top=100.0,
+            block_bottom=105.0,  # Invalid: bottom > top
+            break_close=99.0
+        )
+
+
+def test_retest_validation():
+    engine = BreakerBlockEngine()
+    breaker = engine.check_invalidation(
+        block_role=BlockRole.BULLISH_OB,
+        block_top=105.0,
+        block_bottom=100.0,
+        break_close=99.0
+    )
+    # Short retest inside the zone is valid
+    assert engine.is_retest_valid(breaker, 103.0, "SHORT") is True
+    # Long retest on a bearish breaker is invalid
+    assert engine.is_retest_valid(breaker, 103.0, "LONG") is False
+    # Retest outside the zone is invalid
+    assert engine.is_retest_valid(breaker, 110.0, "SHORT") is False
