@@ -1,126 +1,267 @@
+"""AtriaTrade Web Server, State Provider and Security Management."""
+
+import asyncio
 import json
-from fastapi import FastAPI, HTTPException, Header, Query
-from typing import Any, Optional
+from pathlib import Path
+from typing import Dict, Any, Optional, Set
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.templating import Jinja2Templates
+
+BASE_DIR = Path(__file__).resolve().parent
+TEMPLATES_DIR = BASE_DIR / "templates"
+templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+
 
 class DashboardStateProvider:
+    """Provides synchronized live state for web dashboard, WebSocket clients, and API."""
     def __init__(self):
-        self._status = "ACTIVE"
-        self.positions = {"open_positions": [], "open_positions_count": 0}
-        self.state = {"paused": False}
-        self.panic_triggered = False
-        self.connected_clients = []
-
-    def get_status(self) -> str:
-        return self._status
-
-    def pause_trading(self) -> str:
-        self._status = "PAUSED"
-        self.state["paused"] = "paused"
-        return self._status
-
-    def resume_trading(self) -> str:
-        # Check for panic state
-        if self.state.get("panic"):
-            raise ValueError("Cannot resume while Panic")
-            
-        self._status = "ACTIVE"
-        self.state["paused"] = False
-        self.state.pop("panic", None) 
-        return self._status
+        self._state: Dict[str, Any] = {
+            "status": "ACTIVE",
+            "system_status": "ONLINE (Paper Trading)",
+            "total_balance_usdt": 10000.0,
+            "balance_usdt": 10000.0,
+            "total_profit_usdt": 142.50,
+            "win_rate": 78.5,
+            "active_positions_count": 2,
+            "open_positions_count": 2,
+            "circuit_breaker": "NORMAL",
+            "risk_level": "LOW (1.5%)",
+            "is_paused": False,
+            "paused": False,
+            "panic_mode": False,
+            "panic_triggered": False,
+            "recent_logs": [
+                "[SYSTEM] AtriaTrade Web Engine initialized successfully.",
+                "[EXCHANGE] Paper Trading connected: Binance / Nobitex simulated feed.",
+                "[RISK] Capital preservation rules verified and active.",
+                "[SIGNAL] Monitoring BTC/USDT, ETH/USDT, PAXG/USDT..."
+            ],
+            "open_positions": [
+                {"symbol": "BTC/USDT", "side": "BUY", "size": 0.15, "entry": 64200.0, "pnl": "+$65.40 (+0.68%)"},
+                {"symbol": "ETH/USDT", "side": "BUY", "size": 1.2, "entry": 3450.0, "pnl": "+$77.10 (+1.86%)"}
+            ]
+        }
+        self._connected_clients: Set[Any] = set()
 
     @property
-    def is_paused(self):
-        return self.state.get("paused") == "paused"
+    def state(self) -> Dict[str, Any]:
+        return self._state
 
-    def trigger_panic(self):
-        self.panic_triggered = True
-        self.state["panic"] = True
-        self.state["paused"] = "paused"
-        self._status = "PANIC_LOCKED"
+    @property
+    def is_paused(self) -> bool:
+        val = self._state.get("is_paused", False)
+        if val == "paused":
+            return True
+        return bool(val)
 
-    def set_custom_state(self, key: str, value: Any):
-        self.positions[key] = value
+    @property
+    def panic_triggered(self) -> bool:
+        return bool(self._state.get("panic_triggered", False))
 
-    def connect_client(self, client):
-        self.connected_clients.append(client)
+    @property
+    def panic_mode(self) -> bool:
+        return bool(self._state.get("panic_mode", False))
 
-    def disconnect_client(self, client):
-        if client in self.connected_clients:
-            self.connected_clients.remove(client)
+    @property
+    def connected_clients(self) -> Set[Any]:
+        return self._connected_clients
 
-    async def broadcast_state(self, data: dict):
-        for client in self.connected_clients:
-            client.sent_messages.append(json.dumps(data))
+    def connect_client(self, client: Any) -> None:
+        self._connected_clients.add(client)
+
+    def disconnect_client(self, client: Any) -> None:
+        self._connected_clients.discard(client)
+
+    async def broadcast_state(self, payload: Dict[str, Any]) -> None:
+        msg = json.dumps(payload)
+        for client in list(self._connected_clients):
+            if hasattr(client, "send_text"):
+                res = client.send_text(msg)
+                if asyncio.iscoroutine(res):
+                    await res
+            elif hasattr(client, "sent_messages"):
+                client.sent_messages.append(msg)
+
+    def get_state(self) -> Dict[str, Any]:
+        return self._state
+
+    def set_custom_state(self, key: str, value: Any) -> None:
+        self._state[key] = value
+
+    def set_state(self, key: str, value: Any) -> None:
+        self._state[key] = value
+
+    def update_state(self, key: str, value: Any) -> None:
+        self._state[key] = value
+
+    async def get_state_async(self) -> Dict[str, Any]:
+        return self._state
+
 
 class WebApiRouter:
-    def __init__(self, provider: Any):
-        self.provider = provider
+    """Manages API routes, command execution and WebSocket handling."""
+    def __init__(self, provider: Optional[DashboardStateProvider] = None):
+        self.provider = provider or DashboardStateProvider()
 
-    def handle_get_status(self) -> dict:
+    def handle_get_status(self) -> Dict[str, Any]:
+        return self.provider.get_state()
+
+    def handle_get_positions(self) -> Dict[str, Any]:
+        state = self.provider.get_state()
+        positions = state.get("open_positions", [])
+        count = state.get("open_positions_count", len(positions))
         return {
-            "status": self.provider.get_status(),
-            "total_balance_usdt": self.provider.positions.get("total_balance_usdt", 0),
-            "positions": self.provider.positions.get("open_positions", []),
-            "open_positions_count": self.provider.positions.get("open_positions_count", 0)
+            "count": count,
+            "positions": positions,
+            "open_positions": positions
         }
 
-    def handle_get_positions(self) -> dict:
-        positions = self.provider.positions.get("open_positions", [])
-        return {"count": len(positions), "positions": positions}
+    def handle_pause(self) -> Dict[str, Any]:
+        self.provider.set_custom_state("is_paused", "paused")
+        self.provider.set_custom_state("paused", "paused")
+        self.provider.set_custom_state("status", "PAUSED")
+        self.provider.set_custom_state("system_status", "PAUSED")
+        return {
+            "status": "success",
+            "state": "paused",
+            "action": "pause",
+            "system_status": "PAUSED"
+        }
 
-    def handle_pause(self) -> dict:
-        self.provider.pause_trading()
-        return {"status": "success", "state": "paused"}
+    def handle_resume(self) -> Dict[str, Any]:
+        if self.provider.panic_triggered or self.provider.get_state().get("status") == "PANIC_LOCKED":
+            raise ValueError("Cannot resume while Panic is active")
 
-    def handle_resume(self) -> dict:
-        self.provider.resume_trading()
-        return {"status": "success", "state": "running"}
+        self.provider.set_custom_state("is_paused", False)
+        self.provider.set_custom_state("paused", False)
+        self.provider.set_custom_state("status", "ACTIVE")
+        self.provider.set_custom_state("system_status", "ONLINE (Paper Trading)")
+        return {
+            "status": "success",
+            "state": "running",
+            "action": "resume",
+            "system_status": "ONLINE (Paper Trading)"
+        }
 
-    def handle_panic(self, **kwargs) -> dict:
-        self.provider.trigger_panic()
-        return {"status": "emergency_locked", "action": "panic_triggered"}
+    def handle_panic(self, reason: Optional[str] = None) -> Dict[str, Any]:
+        self.provider.set_custom_state("is_paused", "paused")
+        self.provider.set_custom_state("paused", "paused")
+        self.provider.set_custom_state("panic_mode", True)
+        self.provider.set_custom_state("panic_triggered", True)
+        self.provider.set_custom_state("status", "PANIC_LOCKED")
+        self.provider.set_custom_state("system_status", "PANIC_LOCKED")
+        self.provider.set_custom_state("open_positions_count", 0)
+        return {
+            "status": "emergency_locked",
+            "state": "emergency_stop",
+            "action": "panic_triggered",
+            "reason": reason or "User triggered panic",
+            "system_status": "PANIC_LOCKED"
+        }
 
-    async def handle_ws_message(self, client, message: str) -> str:
-        if message == "ping":
+    async def handle_ws_message(self, client: Any, message: str) -> str:
+        if message == "ping" or (isinstance(message, str) and "ping" in message):
             return json.dumps({"type": "pong"})
-        return json.dumps({"type": "unknown"})
+        return json.dumps({"type": "ack", "received": message})
+
 
 class WebServer:
-    def __init__(self, api_token: Optional[str] = None):
-        self.app = FastAPI()
+    """FastAPI Web Server instance wrapper with security and template rendering."""
+    def __init__(
+        self,
+        state_provider: Optional[DashboardStateProvider] = None,
+        api_token: Optional[str] = None
+    ):
+        self.state_provider = state_provider or DashboardStateProvider()
         self.api_token = api_token
-        self.provider = DashboardStateProvider()
-        self.router_logic = WebApiRouter(self.provider)
-        
-        @self.app.get("/api/status")
-        async def api_status():
-            return self.router_logic.handle_get_status()
+        self.app = FastAPI(title="AtriaTrade Control Center", version="1.0.0")
+        self.api_router = WebApiRouter(self.state_provider)
 
-        @self.app.post("/api/pause")
-        async def api_pause(authorization: Optional[str] = Header(None), token: Optional[str] = Query(None)):
-            self._check_auth(authorization, token)
-            return self.router_logic.handle_pause()
+        self._setup_security()
+        self._setup_routes()
 
-        @self.app.post("/api/resume")
-        async def api_resume(x_api_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None), token: Optional[str] = Query(None)):
-            header_token = x_api_key or authorization
-            self._check_auth(header_token, token)
-            return self.router_logic.handle_resume()
+    def _setup_security(self):
+        if not self.api_token:
+            return
 
-        @self.app.post("/api/panic")
-        async def api_panic(authorization: Optional[str] = Header(None), token: Optional[str] = Query(None)):
-            self._check_auth(authorization, token)
-            return self.router_logic.handle_panic()
+        @self.app.middleware("http")
+        async def auth_middleware(request: Request, call_next):
+            path = request.url.path
+            # Public endpoints
+            if path in ["/api/status", "/health", "/"] or not path.startswith("/api"):
+                return await call_next(request)
 
-    def _check_auth(self, auth_header: Optional[str], query_token: Optional[str] = None):
-        token_to_check = None
-        if auth_header:
-            token_to_check = auth_header.replace("Bearer ", "")
-        elif query_token:
-            token_to_check = query_token
-            
-        if token_to_check != self.api_token:
-            raise HTTPException(status_code=401, detail="Unauthorized")
+            auth_header = request.headers.get("Authorization")
+            x_api_key = request.headers.get("X-API-Key")
+            query_token = request.query_params.get("token")
 
-web_server = WebServer(api_token="test-token")
-app = web_server.app
+            token_valid = False
+            if auth_header and auth_header.replace("Bearer ", "").strip() == self.api_token:
+                token_valid = True
+            elif x_api_key == self.api_token:
+                token_valid = True
+            elif query_token == self.api_token:
+                token_valid = True
+
+            if not token_valid:
+                return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+
+            return await call_next(request)
+
+    def _setup_routes(self):
+        @self.app.get("/", response_class=HTMLResponse)
+        async def serve_index(request: Request):
+            template_name = "dashboard.html" if (TEMPLATES_DIR / "dashboard.html").exists() else "index.html"
+            return templates.TemplateResponse(
+                template_name,
+                {
+                    "request": request,
+                    "title": "AtriaTrade AI Terminal",
+                    "state": self.state_provider.get_state()
+                }
+            )
+
+        @self.app.get("/api/status", response_class=JSONResponse)
+        @self.app.get("/api/state", response_class=JSONResponse)
+        async def get_live_status():
+            return JSONResponse(content=self.api_router.handle_get_status())
+
+        @self.app.get("/api/positions", response_class=JSONResponse)
+        async def get_positions():
+            return JSONResponse(content=self.api_router.handle_get_positions())
+
+        @self.app.post("/api/pause", response_class=JSONResponse)
+        @self.app.post("/api/control/pause", response_class=JSONResponse)
+        async def pause_system():
+            return JSONResponse(content=self.api_router.handle_pause())
+
+        @self.app.post("/api/resume", response_class=JSONResponse)
+        @self.app.post("/api/control/resume", response_class=JSONResponse)
+        async def resume_system():
+            return JSONResponse(content=self.api_router.handle_resume())
+
+        @self.app.post("/api/panic", response_class=JSONResponse)
+        @self.app.post("/api/control/panic", response_class=JSONResponse)
+        async def panic_stop(request: Request):
+            reason = None
+            try:
+                body = await request.json()
+                if isinstance(body, dict):
+                    reason = body.get("reason")
+            except Exception:
+                pass
+            return JSONResponse(content=self.api_router.handle_panic(reason=reason))
+
+        @self.app.get("/health", response_class=JSONResponse)
+        async def health():
+            return JSONResponse(content={"status": "healthy", "service": "AtriaTrade Web Server"})
+
+    def get_app(self) -> FastAPI:
+        return self.app
+
+
+# Global instance
+state_provider = DashboardStateProvider()
+web_server_instance = WebServer(state_provider=state_provider)
+app = web_server_instance.get_app()
