@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <title>AtriaTrade Dashboard</title>
+    <style>
+        body { font-family: sans-serif; background: #0f172a; color: #f8fafc; padding: 20px; }
+        .card { background: #1e293b; padding: 15px; border-radius: 8px; margin-bottom: 15px; }
+        .btn-panic { background: #ef4444; color: white; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>AtriaTrade</h1>
+        <div>موجودی: <span id="total-balance">0</span></div>
+        <div>سود محقق شده: <span id="realized-pnl">0</span></div>
+        <div>سود باز: <span id="unrealized-pnl">0</span></div>
+        <div>افت سرمایه: <span id="drawdown-val">0</span></div>
+    </div>
+
+    <div class="card">
+        <button class="btn-panic" onclick="triggerPanic()">Panic</button>
+        <button onclick="togglePause()">Pause</button>
+        <button onclick="toggleResume()">Resume</button>
+    </div>
+
+    <div class="card">
+        <table>
+            <tbody id="positions-tbody"></tbody>
+        </table>
+    </div>
+
+    <script>
+        async function fetchStatus() {
+            try {
+                const res = await fetch('/api/status');
+                const data = await res.json();
+                if (data.balance) {
+                    document.getElementById('total-balance').textContent = data.balance.total ?? '0';
+                    document.getElementById('realized-pnl').textContent = data.balance.realized_pnl ?? '0';
+                    document.getElementById('unrealized-pnl').textContent = data.balance.unrealized_pnl ?? '0';
+                    document.getElementById('drawdown-val').textContent = data.balance.drawdown ?? '0';
+                }
+            } catch (e) {
+                console.error('fetchStatus failed:', e);
+            }
+        }
+        async function togglePause() {
+            await fetch('/api/pause', { method: 'POST' });
+            fetchStatus();
+        }
+        async function toggleResume() {
+            await fetch('/api/resume', { method: 'POST' });
+            fetchStatus();
+        }
+        async function triggerPanic() {
+            await fetch('/api/panic', { method: 'POST' });
+            fetchStatus();
+        }
+        fetchStatus();
+        setInterval(fetchStatus, 5000);
+    </script>
+</body>
+</html>
