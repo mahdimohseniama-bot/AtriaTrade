@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ورود به کنسول امن AtriaTrade</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Tahoma, sans-serif; }
+        body {
+            background: radial-gradient(circle at top, #131b2e 0%, #080d19 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            color: #e2e8f0;
+        }
+        .login-card {
+            background: rgba(18, 26, 45, 0.85);
+            border: 1px solid rgba(59, 130, 246, 0.25);
+            backdrop-filter: blur(12px);
+            border-radius: 16px;
+            padding: 32px 24px;
+            width: 100%;
+            max-width: 380px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6), 0 0 25px rgba(59, 130, 246, 0.15);
+            text-align: center;
+        }
+        .icon {
+            font-size: 48px;
+            margin-bottom: 12px;
+            display: inline-block;
+            filter: drop-shadow(0 0 10px #3b82f6);
+        }
+        h2 { font-size: 22px; margin-bottom: 6px; color: #60a5fa; font-weight: 700; }
+        p.subtitle { font-size: 13px; color: #94a3b8; margin-bottom: 24px; }
+        .form-group { margin-bottom: 20px; text-align: right; }
+        label { display: block; font-size: 12px; color: #cbd5e1; margin-bottom: 8px; font-weight: 600; }
+        input[type="password"] {
+            width: 100%;
+            padding: 12px 14px;
+            background: #0b1120;
+            border: 1px solid #334155;
+            border-radius: 10px;
+            color: #f8fafc;
+            font-size: 15px;
+            outline: none;
+            transition: all 0.2s ease;
+            text-align: center;
+            letter-spacing: 2px;
+        }
+        input[type="password"]:focus {
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
+        }
+        .btn-submit {
+            width: 100%;
+            padding: 13px;
+            background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 15px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: transform 0.15s ease, filter 0.2s ease;
+            box-shadow: 0 4px 15px rgba(37, 99, 235, 0.35);
+        }
+        .btn-submit:active { transform: scale(0.98); }
+        .error-msg {
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.4);
+            color: #f87171;
+            padding: 10px;
+            border-radius: 8px;
+            font-size: 12px;
+            margin-bottom: 18px;
+        }
+        .badge {
+            display: inline-block;
+            margin-top: 24px;
+            padding: 4px 12px;
+            background: rgba(16, 185, 129, 0.12);
+            color: #34d399;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 600;
+            border: 1px solid rgba(16, 185, 129, 0.25);
+        }
+    </style>
+</head>
+<body>
+    <div class="login-card">
+        <div class="icon">🛡️</div>
+        <h2>مرکز فرماندهی AtriaTrade</h2>
+        <p class="subtitle">سیستم احراز هویت امنیتی</p>
+
+        {% if error %}
+        <div class="error-msg">{{ error }}</div>
+        {% endif %}
+
+        <form action="/login" method="post">
+            <div class="form-group">
+                <label for="password">رمز عبور ادمین:</label>
+                <input type="password" id="password" name="password" placeholder="••••••••" required autofocus>
+            </div>
+            <button type="submit" class="btn-submit">ورود به پنل مانیتورینگ</button>
+        </form>
+
+        <div class="badge">● Paper Trading Mode</div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AtriaTrade Pro Dashboard</title>
+    <style>
+        :root {
+            --bg-main: #0b0e14;
+            --bg-card: #151a23;
+            --border-color: #232936;
+            --accent-blue: #2563eb;
+            --accent-green: #10b981;
+            --accent-red: #ef4444;
+            --accent-yellow: #f59e0b;
+            --text-main: #f3f4f6;
+            --text-muted: #9ca3af;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+        body { background-color: var(--bg-main); color: var(--text-main); padding: 12px; }
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: var(--bg-card); border-radius: 10px; border: 1px solid var(--border-color); margin-bottom: 12px; }
+        .brand { font-size: 1.2rem; font-weight: bold; color: #60a5fa; display: flex; align-items: center; gap: 8px; }
+        .badge { background: #1e3a8a; color: #93c5fd; padding: 2px 8px; border-radius: 6px; font-size: 0.75rem; }
+        .logout-btn { background: #374151; color: #fff; text-decoration: none; padding: 6px 12px; border-radius: 6px; font-size: 0.8rem; }
+        .grid-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 12px; }
+        .card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 10px; padding: 14px; }
+        .card-title { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 6px; }
+        .card-val { font-size: 1.25rem; font-weight: bold; }
+        .card-val.green { color: var(--accent-green); }
+        .card-val.blue { color: #60a5fa; }
+        .card-val.yellow { color: var(--accent-yellow); }
+        .controls { display: flex; gap: 10px; margin-bottom: 12px; }
+        .btn { flex: 1; padding: 12px; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; transition: 0.2s; font-size: 0.9rem; }
+        .btn-start { background: var(--accent-green); color: #fff; }
+        .btn-stop { background: var(--accent-red); color: #fff; }
+        .chart-box { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 10px; padding: 14px; margin-bottom: 12px; }
+        .chart-header { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 0.9rem; }
+        canvas { width: 100% !important; height: 180px; background: #0d1117; border-radius: 6px; }
+        .logs-box { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 10px; padding: 14px; }
+        .logs-title { font-size: 0.85rem; margin-bottom: 8px; color: var(--text-muted); display: flex; justify-content: space-between; }
+        .logs-content { background: #0d1117; border-radius: 6px; padding: 10px; height: 130px; overflow-y: auto; font-family: monospace; font-size: 0.75rem; line-height: 1.5; color: #a7f3d0; direction: ltr; text-align: left; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="brand">
+            <span>AtriaTrade Pro</span>
+            <span class="badge">Paper Mode</span>
+        </div>
+        <a href="/logout" class="logout-btn">خروج</a>
+    </div>
+
+    <div class="grid-cards">
+        <div class="card">
+            <div class="card-title">موجودی کل (USDT)</div>
+            <div id="total-balance" class="card-val blue">10,000.00</div>
+        </div>
+        <div class="card">
+            <div class="card-title">سود محقق‌شده</div>
+            <div id="realized-pnl" class="card-val green">+0.00</div>
+        </div>
+        <div class="card">
+            <div class="card-title">وضعیت ربات</div>
+            <div id="bot-status" class="card-val yellow">متوقف</div>
+        </div>
+        <div class="card">
+            <div class="card-title">نرخ برد (Win Rate)</div>
+            <div id="win-rate" class="card-val">0.0%</div>
+        </div>
+    </div>
+
+    <div class="controls">
+        <button id="btn-start" class="btn btn-start" onclick="toggleBot('start')">▶ شروع فعالیت ربات</button>
+        <button id="btn-stop" class="btn btn-stop" onclick="toggleBot('stop')">⏹ توقف اضطراری</button>
+    </div>
+
+    <div class="chart-box">
+        <div class="chart-header">
+            <span>نمودار زنده BTC/USDT (M1)</span>
+            <span id="btc-price" style="font-weight: bold; color: #60a5fa;">$--</span>
+        </div>
+        <canvas id="priceChart"></canvas>
+    </div>
+
+    <div class="logs-box">
+        <div class="logs-title">
+            <span>لاگ‌های سیستم و سیگنال‌ها</span>
+            <span id="log-time" style="font-size: 0.7rem; color: #6b7280;">--:--:--</span>
+        </div>
+        <div id="logs" class="logs-content"></div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('priceChart');
+        const ctx = canvas.getContext('2d');
+        let priceHistory = [];
+        let basePrice = 64250.0;
+
+        function resizeCanvas() {
+            canvas.width = canvas.parentElement.clientWidth - 28;
+            canvas.height = 180;
+            drawChart();
+        }
+        window.addEventListener('resize', resizeCanvas);
+
+        for (let i = 0; i < 30; i++) {
+            basePrice += (Math.random() - 0.49) * 25;
+            priceHistory.push(basePrice);
+        }
+
+        function drawChart() {
+            if (!canvas.width || priceHistory.length === 0) return;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            const min = Math.min(...priceHistory) * 0.9995;
+            const max = Math.max(...priceHistory) * 1.0005;
+            const range = max - min || 1;
+            const step = canvas.width / (priceHistory.length - 1);
+
+            // پس‌زمینه گرادیانت خط چارت
+            const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+            grad.addColorStop(0, 'rgba(37, 99, 235, 0.35)');
+            grad.addColorStop(1, 'rgba(37, 99, 235, 0.0)');
+
+            ctx.beginPath();
+            priceHistory.forEach((p, idx) => {
+                const x = idx * step;
+                const y = canvas.height - ((p - min) / range) * (canvas.height - 30) - 15;
+                if (idx === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            });
+            ctx.strokeStyle = '#3b82f6';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            ctx.lineTo(canvas.width, canvas.height);
+            ctx.lineTo(0, canvas.height);
+            ctx.fillStyle = grad;
+            ctx.fill();
+
+            // رسم آخرین قیمت
+            const lastP = priceHistory[priceHistory.length - 1];
+            const lastY = canvas.height - ((lastP - min) / range) * (canvas.height - 30) - 15;
+            ctx.beginPath();
+            ctx.arc(canvas.width - 2, lastY, 4, 0, Math.PI * 2);
+            ctx.fillStyle = '#60a5fa';
+            ctx.fill();
+        }
+
+        function addLog(msg) {
+            const logsEl = document.getElementById('logs');
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('fa-IR');
+            document.getElementById('log-time').innerText = timeStr;
+            const line = document.createElement('div');
+            line.innerHTML = `<span style="color:#6b7280;">[${now.toLocaleTimeString('en-US', {hour12:false})}]</span> ${msg}`;
+            logsEl.appendChild(line);
+            logsEl.scrollTop = logsEl.scrollHeight;
+        }
+
+        async function fetchStatus() {
+            try {
+                const res = await fetch('/api/status');
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.balance !== undefined) document.getElementById('total-balance').innerText = Number(data.balance).toLocaleString('en-US', {minimumFractionDigits: 2});
+                    if (data.realized_pnl !== undefined) {
+                        const pnlEl = document.getElementById('realized-pnl');
+                        pnlEl.innerText = (data.realized_pnl >= 0 ? '+' : '') + Number(data.realized_pnl).toFixed(2);
+                        pnlEl.className = 'card-val ' + (data.realized_pnl >= 0 ? 'green' : 'red');
+                    }
+                    if (data.is_running !== undefined) {
+                        const stEl = document.getElementById('bot-status');
+                        stEl.innerText = data.is_running ? 'فعال و در حال تحلیل' : 'متوقف';
+                        stEl.className = 'card-val ' + (data.is_running ? 'green' : 'yellow');
+                    }
+                    if (data.btc_price) {
+                        document.getElementById('btc-price').innerText = '$' + Number(data.btc_price).toLocaleString();
+                        priceHistory.push(Number(data.btc_price));
+                        if (priceHistory.length > 40) priceHistory.shift();
+                        drawChart();
+                    }
+                }
+            } catch (err) {
+                console.log('Status polling...', err);
+            }
+        }
+
+        async function toggleBot(action) {
+            try {
+                addLog(`ارسال دستور ${action === 'start' ? 'شروع ربات' : 'توقف ربات'} به سرور...`);
+                const res = await fetch(`/api/bot/${action}`, { method: 'POST' });
+                if (res.ok) {
+                    addLog(`وضعیت با موفقیت تغییر کرد: ${action}`);
+                    fetchStatus();
+                } else {
+                    addLog(`<span style="color:#ef4444;">خطا در ارسال دستور ${action}</span>`);
+                }
+            } catch (e) {
+                addLog(`<span style="color:#ef4444;">خطای شبکه در برقراری ارتباط با سرور</span>`);
+            }
+        }
+
+        // مقداردهی اولیه
+        resizeCanvas();
+        addLog("سامانه وب متصل شد. ماژول‌های Paper Trading در حالت آماده‌باش.");
+        document.getElementById('btc-price').innerText = '$' + priceHistory[priceHistory.length - 1].toFixed(2);
+        setInterval(fetchStatus, 3000);
+    </script>
+</body>
+</html>
