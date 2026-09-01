@@ -3,131 +3,46 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>داشبورد معاملاتی AtriaTrade Pro</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <title>AtriaTrade Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Tahoma, sans-serif; }
-        body { background: #0b0f19; color: #e2e8f0; padding: 12px; }
-        .header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: #131b2e; border-radius: 12px; border: 1px solid #1e293b; margin-bottom: 15px; }
-        .header h1 { font-size: 18px; color: #60a5fa; display: flex; align-items: center; gap: 8px; }
-        .badge-paper { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid #10b981; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: bold; }
-        .grid-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 15px; }
-        .card { background: #131b2e; border: 1px solid #1e293b; border-radius: 12px; padding: 14px; text-align: center; }
-        .card .title { font-size: 12px; color: #94a3b8; margin-bottom: 6px; }
-        .card .val { font-size: 18px; font-weight: bold; color: #38bdf8; }
-        .card .val.green { color: #4ade80; }
-        .card .val.red { color: #f87171; }
-        
-        .controls { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 15px; }
-        .btn { padding: 12px 6px; border: none; border-radius: 10px; font-weight: bold; font-size: 13px; cursor: pointer; transition: 0.2s; color: white; text-align: center; }
-        .btn-start { background: #16a34a; }
-        .btn-stop { background: #d97706; }
-        .btn-panic { background: #dc2626; }
-        .btn:active { transform: scale(0.96); }
-
-        .chart-box { background: #131b2e; border: 1px solid #1e293b; border-radius: 12px; padding: 14px; margin-bottom: 15px; }
-        .logs-box { background: #070a12; border: 1px solid #1e293b; border-radius: 12px; padding: 12px; max-height: 180px; overflow-y: auto; font-family: monospace; font-size: 11px; color: #a5b4fc; }
-        .log-entry { margin-bottom: 5px; border-bottom: 1px dashed rgba(255,255,255,0.05); padding-bottom: 3px; }
-        .btn-logout { background: #334155; padding: 6px 12px; font-size: 11px; border-radius: 8px; color: #cbd5e1; text-decoration: none; }
+        body { background-color: #0f172a; color: #f8fafc; font-family: Tahoma, Arial, sans-serif; }
     </style>
 </head>
-<body>
-
-    <div class="header">
-        <h1>⚡ AtriaTrade Pro</h1>
-        <div style="display: flex; gap: 8px; align-items: center;">
-            <span class="badge-paper">Paper Trading</span>
-            <a href="/login" class="btn-logout">خروج</a>
+<body class="p-6">
+    <div class="max-w-4xl mx-auto">
+        <header class="flex justify-between items-center border-b border-gray-700 pb-4 mb-6">
+            <div>
+                <h1 class="text-3xl font-bold text-blue-400">AtriaTrade</h1>
+                <p class="text-sm text-gray-400 mt-1">Institutional Trading Bot</p>
+            </div>
+            <div class="bg-green-900 text-green-300 px-4 py-2 rounded-lg text-sm font-bold border border-green-700 shadow-[0_0_10px_rgba(34,197,94,0.3)]">
+                🟢 {{ status }}
+            </div>
+        </header>
+        
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="bg-gray-800 p-5 rounded-xl border border-gray-700">
+                <h2 class="text-xl mb-3 border-b border-gray-600 pb-2">وضعیت سیستم</h2>
+                <p id="health-status" class="text-gray-400">در حال اتصال به سرور...</p>
+            </div>
+            <div class="bg-gray-800 p-5 rounded-xl border border-gray-700">
+                <h2 class="text-xl mb-3 border-b border-gray-600 pb-2">وضعیت بازار</h2>
+                <p class="text-gray-400">منتظر دریافت دیتا...</p>
+            </div>
         </div>
-    </div>
-
-    <!-- آمار و بالانس -->
-    <div class="grid-stats">
-        <div class="card">
-            <div class="title">موجودی کل (USDT)</div>
-            <div class="val" id="total-balance">10,000.00</div>
-        </div>
-        <div class="card">
-            <div class="title">سود خالص کل (PnL)</div>
-            <div class="val green" id="pnl">+0.00%</div>
-        </div>
-        <div class="card">
-            <div class="title">وضعیت سیستم</div>
-            <div class="val" id="engine-status" style="color: #4ade80;">فعال (Running)</div>
-        </div>
-        <div class="card">
-            <div class="title">پوزیشن‌های باز</div>
-            <div class="val" id="open-positions">0</div>
-        </div>
-    </div>
-
-    <!-- دکمه‌های کنترل زنده -->
-    <div class="controls">
-        <button class="btn btn-start" onclick="sendControl('start')">▶️ شروع ربات</button>
-        <button class="btn btn-stop" onclick="sendControl('stop')">⏸️ توقف امن</button>
-        <button class="btn btn-panic" onclick="sendControl('panic')">🚨 توقف اضطراری</button>
-    </div>
-
-    <!-- چارت تحلیل زنده -->
-    <div class="chart-box">
-        <div style="font-size: 13px; font-weight: bold; margin-bottom: 10px; color: #94a3b8;">📈 تغییرات موجودی و PnL زنده</div>
-        <canvas id="balanceChart" style="max-height: 190px;"></canvas>
-    </div>
-
-    <!-- کنسول لاگ‌ها -->
-    <div style="font-size: 13px; font-weight: bold; margin-bottom: 6px; color: #94a3b8;">📜 لاگ‌های رویداد زنده</div>
-    <div class="logs-box" id="logs-container">
-        <div class="log-entry">[INFO] داشبورد وب بارگذاری شد - سیستم در حالت تست آماده به کار است.</div>
     </div>
 
     <script>
-        // چارت
-        const ctx = document.getElementById('balanceChart').getContext('2d');
-        const balanceChart = new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels: ['0m', '5m', '10m', '15m', '20m'],
-                datasets: [{
-                    label: 'Balance (USDT)',
-                    data: [10000, 10000, 10000, 10000, 10000],
-                    borderColor: '#38bdf8',
-                    backgroundColor: 'rgba(56, 189, 248, 0.1)',
-                    fill: true,
-                    tension: 0.3
-                }]
-            },
-            options: {
-                responsive: true,
-                scales: {
-                    x: { grid: { color: 'rgba(255,255,255,0.05)' } },
-                    y: { grid: { color: 'rgba(255,255,255,0.05)' } }
-                },
-                plugins: { legend: { display: false } }
-            }
-        });
-
-        // ارسال فرمان کنترلی
-        async function sendControl(action) {
-            try {
-                const res = await fetch('/api/control', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: action })
-                });
-                const data = await res.json();
-                addLog(`[ACTION] فرمان ${action} با وضعیت ${data.status || 'OK'} اجرا شد.`);
-            } catch(e) {
-                addLog(`[ERROR] خطا در ارسال فرمان: ${e.message}`);
-            }
-        }
-
-        function addLog(text) {
-            const container = document.getElementById('logs-container');
-            const el = document.createElement('div');
-            el.className = 'log-entry';
-            el.textContent = `${new Date().toLocaleTimeString()} - ${text}`;
-            container.prepend(el);
-        }
+        fetch('/health')
+            .then(res => res.json())
+            .then(data => {
+                document.getElementById('health-status').innerHTML = 
+                    `وضعیت API: <span class="text-green-400">متصل (200 OK)</span><br>حالت: ${data.mode}`;
+            })
+            .catch(err => {
+                document.getElementById('health-status').innerHTML = '<span class="text-red-500">خطا در ارتباط</span>';
+            });
     </script>
 </body>
 </html>
