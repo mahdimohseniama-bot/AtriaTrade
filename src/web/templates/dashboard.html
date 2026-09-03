@@ -3,138 +3,126 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AtriaTrade Pro - Command Center</title>
+    <title>AtriaTrade Pro Auto-Pilot</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         body { font-family: system-ui, -apple-system, sans-serif; }
-        .glass { background: rgba(23, 28, 40, 0.85); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.07); }
-        .ltr { direction: ltr; display: inline-block; }
+        .glass-panel {
+            background: rgba(17, 24, 39, 0.85);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
     </style>
 </head>
-<body class="bg-[#0b0e14] text-gray-200 min-h-screen p-3 space-y-3 pb-8">
+<body class="bg-gray-950 text-gray-100 min-h-screen p-3 sm:p-5 flex flex-col gap-4">
 
-    <!-- Header -->
-    <header class="glass rounded-xl p-3 flex justify-between items-center shadow-lg">
-        <div class="flex items-center space-x-2 space-x-reverse">
-            <span class="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></span>
-            <h1 class="text-sm sm:text-base font-black tracking-wider text-white">ATRIATRADE <span class="text-xs text-emerald-400 font-mono">AUTO-PILOT</span></h1>
+    <!-- Header & Quick Controls -->
+    <header class="flex justify-between items-center bg-gray-900 border border-gray-800 p-3 rounded-2xl shadow-lg">
+        <div class="flex items-center gap-2">
+            <span class="inline-block w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></span>
+            <h1 class="text-sm sm:text-base font-bold tracking-wide">ATRIATRADE AUTO-PILOT</h1>
         </div>
-        <div class="flex gap-2">
-            <button onclick="sendAction('toggle_auto')" id="autoBtn" class="px-2.5 py-1 text-xs rounded-lg font-bold bg-emerald-600 text-white flex items-center gap-1 shadow">
-                <i class="fas fa-robot"></i> <span id="autoText">اتوپایلوت: فعال</span>
-            </button>
-            <button onclick="sendAction('panic')" class="px-2.5 py-1 text-xs rounded-lg font-bold bg-rose-600 text-white flex items-center gap-1 shadow animate-pulse">
-                <i class="fas fa-exclamation-triangle"></i> PANIC
-            </button>
+        <div class="flex items-center gap-2">
+            <button id="auto-btn" onclick="triggerAction('toggle_auto')" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-emerald-600 text-white hover:bg-emerald-500 transition">اتوپایلوت: فعال</button>
+            <button onclick="triggerAction('panic')" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-rose-600 text-white hover:bg-rose-500 transition">PANIC 🚨</button>
         </div>
     </header>
 
-    <!-- Top Metrics Grid -->
-    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-        <div class="glass p-2.5 rounded-xl border-r-4 border-emerald-500">
-            <p class="text-[11px] text-gray-400">قیمت BTC/USDT</p>
-            <h2 id="btcPrice" class="text-base font-black text-emerald-400 font-mono mt-0.5 ltr">$0.00</h2>
+    <!-- Metrics Grid -->
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div class="glass-panel p-3.5 rounded-2xl border-cyan-500/30">
+            <div class="text-[11px] text-gray-400 font-medium">قیمت BTC/USDT</div>
+            <div id="btc-price" class="text-base sm:text-lg font-black text-cyan-400 mt-1">$0.00</div>
         </div>
-        <div class="glass p-2.5 rounded-xl border-r-4 border-cyan-500">
-            <p class="text-[11px] text-gray-400">کل سرمایه (Equity)</p>
-            <h2 id="totalEquity" class="text-base font-black text-cyan-400 font-mono mt-0.5 ltr">$0.00</h2>
+        <div class="glass-panel p-3.5 rounded-2xl border-blue-500/30">
+            <div class="text-[11px] text-gray-400 font-medium">کل سرمایه (Equity)</div>
+            <div id="total-equity" class="text-base sm:text-lg font-black text-blue-400 mt-1">$0.00</div>
         </div>
-        <div class="glass p-2.5 rounded-xl border-r-4 border-amber-500">
-            <p class="text-[11px] text-gray-400">صندوق امن ذخیره سود</p>
-            <h2 id="reserveVault" class="text-base font-black text-amber-400 font-mono mt-0.5 ltr">$0.00</h2>
+        <div class="glass-panel p-3.5 rounded-2xl border-amber-500/30">
+            <div class="text-[11px] text-gray-400 font-medium">صندوق امن سود</div>
+            <div id="reserve-vault" class="text-base sm:text-lg font-black text-amber-400 mt-1">$0.00</div>
         </div>
-        <div class="glass p-2.5 rounded-xl border-r-4 border-purple-500">
-            <p class="text-[11px] text-gray-400">سود کل محقق شده</p>
-            <h2 id="totalProfit" class="text-base font-black text-purple-400 font-mono mt-0.5 ltr">+0.00 USDT</h2>
+        <div class="glass-panel p-3.5 rounded-2xl border-purple-500/30">
+            <div class="text-[11px] text-gray-400 font-medium">نرخ برد / سود کل</div>
+            <div id="win-rate-stat" class="text-base sm:text-lg font-black text-purple-400 mt-1">0% (+$0.00)</div>
         </div>
     </div>
 
-    <!-- Live Price Chart -->
-    <div class="glass p-3 rounded-xl">
+    <!-- Live Chart Panel -->
+    <div class="glass-panel p-3.5 rounded-2xl">
         <div class="flex justify-between items-center mb-2">
-            <div class="flex items-center gap-2">
-                <i class="fas fa-chart-line text-emerald-400 text-xs"></i>
-                <span class="text-xs font-bold text-gray-300">نمودار زنده قیمت BTC</span>
-            </div>
-            <span id="chartTrendBadge" class="text-[11px] px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 font-mono border border-emerald-800">LIVE</span>
+            <div class="text-xs font-bold text-gray-300">📈 نوسانات زنده قیمت BTC</div>
+            <span class="text-[10px] bg-emerald-950 text-emerald-400 border border-emerald-800 px-2 py-0.5 rounded-full font-semibold">LIVE</span>
         </div>
-        <div class="h-36 sm:h-44 w-full">
-            <canvas id="liveChart"></canvas>
+        <div class="h-44 w-full">
+            <canvas id="priceChart"></canvas>
         </div>
     </div>
 
-    <!-- AI Strategy & Position Banner -->
-    <div class="glass p-3 rounded-xl flex flex-wrap justify-between items-center gap-3">
-        <div class="flex items-center gap-4">
-            <div>
-                <span class="text-[11px] text-gray-400 block">شاخص RSI (14)</span>
-                <span id="rsiVal" class="font-mono text-sm font-bold text-yellow-400">50.0</span>
+    <!-- Indicators & Active Position -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div class="glass-panel p-3.5 rounded-2xl flex flex-col justify-between">
+            <div class="text-xs font-bold text-gray-400">تحلیل تکنیکال</div>
+            <div class="flex justify-between items-center mt-2">
+                <span class="text-xs text-gray-300">شاخص RSI (14):</span>
+                <span id="rsi-val" class="text-sm font-bold text-amber-400">--</span>
             </div>
-            <div>
-                <span class="text-[11px] text-gray-400 block">روند مارکت</span>
-                <span id="marketTrend" class="text-xs font-bold text-gray-300">در حال تحلیل...</span>
+            <div class="flex justify-between items-center mt-1">
+                <span class="text-xs text-gray-300">روند استراتژی:</span>
+                <span id="trend-val" class="text-xs font-bold text-emerald-400">--</span>
             </div>
         </div>
-        <div class="flex items-center gap-2 bg-gray-900/60 px-3 py-1.5 rounded-lg border border-gray-700/50">
-            <span class="text-xs text-gray-400">پوزیشن فعال:</span>
-            <span id="activePos" class="font-mono text-xs font-bold text-gray-200">FLAT</span>
-            <span id="posPnl" class="font-mono text-xs font-bold ltr"></span>
+        <div class="glass-panel p-3.5 rounded-2xl flex flex-col justify-between border-indigo-500/30">
+            <div class="text-xs font-bold text-gray-400">پوزیشن فعال ربات</div>
+            <div id="active-position" class="text-xs font-semibold text-gray-200 mt-2">بدون معامله باز</div>
+            <div id="pos-pnl" class="text-xs font-bold mt-1 text-gray-400">PnL: $0.00</div>
         </div>
     </div>
 
-    <!-- Manual Quick Order Controls -->
-    <div class="glass p-3 rounded-xl flex gap-2">
-        <button onclick="sendAction('buy')" class="flex-1 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 font-bold text-xs flex justify-center items-center gap-1 shadow">
-            <i class="fas fa-arrow-up"></i> خرید دستی 0.02 BTC
+    <!-- Manual Trade Buttons -->
+    <div class="grid grid-cols-2 gap-3">
+        <button onclick="triggerAction('buy')" class="w-full py-2.5 rounded-xl bg-emerald-600/90 hover:bg-emerald-500 font-bold text-xs text-white transition flex items-center justify-center gap-1">
+            ↑ خرید دستی 0.02 BTC
         </button>
-        <button onclick="sendAction('sell')" class="flex-1 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 font-bold text-xs flex justify-center items-center gap-1 shadow">
-            <i class="fas fa-arrow-down"></i> فروش دستی 0.02 BTC
+        <button onclick="triggerAction('sell')" class="w-full py-2.5 rounded-xl bg-rose-600/90 hover:bg-rose-500 font-bold text-xs text-white transition flex items-center justify-center gap-1">
+            ↓ فروش دستی 0.02 BTC
         </button>
     </div>
 
-    <!-- Recent Trades & Terminal Logs -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <!-- Trades History -->
-        <div class="glass p-3 rounded-xl flex flex-col">
-            <div class="flex items-center gap-1.5 text-xs text-gray-400 mb-2">
-                <i class="fas fa-history text-cyan-400"></i> معاملات اخیر ربات
-            </div>
-            <div id="tradesList" class="space-y-1.5 text-xs font-mono max-h-36 overflow-y-auto">
-                <div class="text-gray-500 text-[11px]">هنوز معامله‌ای بسته نشده است.</div>
+    <!-- Recent Trades & System Logs -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div class="glass-panel p-3 rounded-2xl">
+            <div class="text-xs font-bold text-gray-400 mb-2">📜 تاریخچه معاملات بسته شده</div>
+            <div id="trades-container" class="text-[11px] space-y-1.5 max-h-32 overflow-y-auto text-gray-300">
+                <p class="text-gray-500">هنوز معامله‌ای ثبت نشده است.</p>
             </div>
         </div>
-
-        <!-- System Logs -->
-        <div class="glass p-3 rounded-xl flex flex-col">
-            <div class="flex items-center gap-1.5 text-xs text-gray-400 mb-2">
-                <i class="fas fa-terminal text-emerald-400"></i> گزارش زنده سیستم
-            </div>
-            <div id="logConsole" class="space-y-1 text-xs font-mono max-h-36 overflow-y-auto text-gray-300">
+        <div class="glass-panel p-3 rounded-2xl">
+            <div class="text-xs font-bold text-gray-400 mb-2">⚡️ رویدادهای زنده سیستم</div>
+            <div id="logs-container" class="font-mono text-[10px] space-y-1 max-h-32 overflow-y-auto text-emerald-400/90">
+                <p>در انتظار لاگ...</p>
             </div>
         </div>
     </div>
 
     <script>
-        // Chart Initialization
-        const ctx = document.getElementById('liveChart').getContext('2d');
-        const chartData = {
-            labels: [],
-            datasets: [{
-                label: 'BTC Price',
-                data: [],
-                borderColor: '#10b981',
-                backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                borderWidth: 2,
-                fill: true,
-                tension: 0.35,
-                pointRadius: 2
-            }]
-        };
+        const ctx = document.getElementById('priceChart').getContext('2d');
         const priceChart = new Chart(ctx, {
             type: 'line',
-            data: chartData,
+            data: {
+                labels: Array(25).fill(''),
+                datasets: [{
+                    label: 'BTC/USDT',
+                    data: Array(25).fill(63400),
+                    borderColor: '#10b981',
+                    borderWidth: 2,
+                    tension: 0.35,
+                    pointRadius: 1,
+                    fill: true,
+                    backgroundColor: 'rgba(16, 185, 129, 0.08)'
+                }]
+            },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
@@ -143,7 +131,7 @@
                     x: { display: false },
                     y: { 
                         grid: { color: 'rgba(255, 255, 255, 0.05)' },
-                        ticks: { color: '#9ca3af', font: { size: 10 } }
+                        ticks: { color: '#6b7280', font: { size: 9 } }
                     }
                 }
             }
@@ -154,83 +142,63 @@
                 const res = await fetch('/api/telemetry');
                 const data = await res.json();
                 
-                document.getElementById('btcPrice').innerText = '$' + data.btc_price;
-                document.getElementById('totalEquity').innerText = '$' + data.total_equity;
-                document.getElementById('reserveVault').innerText = '$' + data.reserve_usdt;
-                document.getElementById('totalProfit').innerText = data.total_profit_usdt + ' USDT';
-                document.getElementById('rsiVal').innerText = data.rsi;
-                document.getElementById('marketTrend').innerText = data.trend;
+                document.getElementById('btc-price').innerText = '$' + data.btc_price;
+                document.getElementById('total-equity').innerText = '$' + data.total_equity;
+                document.getElementById('reserve-vault').innerText = '$' + data.reserve_usdt;
+                document.getElementById('win-rate-stat').innerText = `${data.win_rate} (${data.total_profit_usdt})`;
                 
-                // Update Live Chart
-                const rawPrice = parseFloat(data.btc_price.replace(/,/g, ''));
-                const nowTime = new Date().toLocaleTimeString('fa-IR');
-                if (priceChart.data.labels.length > 20) {
-                    priceChart.data.labels.shift();
-                    priceChart.data.datasets[0].data.shift();
-                }
-                priceChart.data.labels.push(nowTime);
-                priceChart.data.datasets[0].data.push(rawPrice);
-                priceChart.update();
+                document.getElementById('rsi-val').innerText = data.rsi;
+                document.getElementById('trend-val').innerText = data.trend;
 
-                // Auto Pilot Button UI
-                const autoBtn = document.getElementById('autoBtn');
-                const autoText = document.getElementById('autoText');
-                if (data.auto_pilot) {
-                    autoBtn.className = "px-2.5 py-1 text-xs rounded-lg font-bold bg-emerald-600 text-white flex items-center gap-1 shadow";
-                    autoText.innerText = "اتوپایلوت: فعال";
-                } else {
-                    autoBtn.className = "px-2.5 py-1 text-xs rounded-lg font-bold bg-gray-600 text-white flex items-center gap-1 shadow";
-                    autoText.innerText = "اتوپایلوت: خاموش";
-                }
-
-                // Position Display
                 const pos = data.position;
-                const posElem = document.getElementById('activePos');
-                const pnlElem = document.getElementById('posPnl');
                 if (pos.side !== 'FLAT') {
-                    posElem.innerText = `${pos.side} (${pos.amount} BTC @ ${pos.entry_price})`;
-                    pnlElem.innerText = `[PnL: ${pos.pnl > 0 ? '+' : ''}${pos.pnl} USDT]`;
-                    pnlElem.className = pos.pnl >= 0 ? "font-mono text-xs font-bold text-emerald-400 ltr" : "font-mono text-xs font-bold text-rose-400 ltr";
+                    document.getElementById('active-position').innerText = `${pos.side} (${pos.amount} BTC @ ${pos.entry_price})`;
+                    const pnlVal = parseFloat(pos.pnl);
+                    const pnlElem = document.getElementById('pos-pnl');
+                    pnlElem.innerText = `PnL: ${pnlVal >= 0 ? '+' : ''}${pnlVal.toFixed(2)} USDT [TP: ${pos.tp} | SL: ${pos.sl}]`;
+                    pnlElem.className = `text-xs font-bold mt-1 ${pnlVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`;
                 } else {
-                    posElem.innerText = "FLAT (بدون پوزیشن)";
-                    pnlElem.innerText = "";
+                    document.getElementById('active-position').innerText = 'بدون معامله باز (در حال تحلیل)';
+                    document.getElementById('pos-pnl').innerText = 'PnL: $0.00';
+                    document.getElementById('pos-pnl').className = 'text-xs font-bold mt-1 text-gray-500';
                 }
 
-                // Recent Trades
-                const tradesDiv = document.getElementById('tradesList');
+                // Update Chart
+                const currPrice = parseFloat(data.btc_price.replace(/,/g, ''));
+                priceChart.data.datasets[0].data.push(currPrice);
+                priceChart.data.datasets[0].data.shift();
+                priceChart.update('none');
+
+                // Update Trades
+                const tradesContainer = document.getElementById('trades-container');
                 if (data.recent_trades.length > 0) {
-                    tradesDiv.innerHTML = data.recent_trades.map(t => `
-                        <div class="flex justify-between items-center bg-black/30 p-1.5 rounded border border-gray-800">
-                            <span class="text-gray-300 text-[11px]">${t.time} - ${t.action} @ $${t.price}</span>
-                            <span class="${t.pnl.startsWith('+') ? 'text-emerald-400' : 'text-rose-400'} font-bold ltr text-[11px]">${t.pnl}</span>
+                    tradesContainer.innerHTML = data.recent_trades.map(t => `
+                        <div class="flex justify-between border-b border-gray-800 pb-1">
+                            <span>[${t.time}] ${t.action}</span>
+                            <span class="${t.pnl.includes('+') ? 'text-emerald-400' : 'text-rose-400'} font-bold">${t.pnl}</span>
                         </div>
                     `).join('');
                 }
 
-                // Logs
-                const logDiv = document.getElementById('logConsole');
-                logDiv.innerHTML = data.logs.map(l => `<div class="text-[11px]">${l}</div>`).join('');
-                logDiv.scrollTop = logDiv.scrollHeight;
+                // Update Logs
+                const logsContainer = document.getElementById('logs-container');
+                logsContainer.innerHTML = data.logs.slice(-15).reverse().map(l => `<div>${l}</div>`).join('');
 
             } catch (err) {
-                console.error("خطا در تلمتری:", err);
+                console.error("Telemetry fetch error:", err);
             }
         }
 
-        async function sendAction(actionName) {
-            try {
-                await fetch('/api/action', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ action: actionName, symbol: 'BTCUSDT', amount: 0.02 })
-                });
-                fetchTelemetry();
-            } catch (err) {
-                console.error("خطا در ارسال دستور:", err);
-            }
+        async function triggerAction(action) {
+            await fetch('/api/action', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: action, amount: 0.02 })
+            });
+            fetchTelemetry();
         }
 
-        setInterval(fetchTelemetry, 2500);
+        setInterval(fetchTelemetry, 1800);
         fetchTelemetry();
     </script>
 </body>
