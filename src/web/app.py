@@ -1,315 +1,212 @@
 import asyncio
 import random
 from datetime import datetime
-from pathlib import Path
-from typing import Any
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel, Field
+from fastapi import FastAPI
+from fastapi.responses import HTMLResponse, Response
+from pydantic import BaseModel
+import csv
+import io
+import sqlite3
+import os
 
-BASE_DIR = Path(__file__).resolve().parent
-TEMPLATES_DIR = BASE_DIR / "templates"
+app = FastAPI(title="AtriaTrade Pro")
 
-app = FastAPI(title="AtriaTrade Paper Trading")
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+# پایگاه داده SQLite برای ذخیره قطعی تاریخچه معاملات
+DB_PATH = "data/trading.db"
+os.makedirs("data", exist_ok=True)
 
-def new_position() -> dict[str, Any]:
-    return {
-        "side": "FLAT",
-        "entry_price": 0.0,
-        "amount": 0.0,
-        "highest_price": 0.0,
-        "lowest_price": 0.0,
-        "unrealized_pnl": 0.0,
-        "tp_price": 0.0,
-        "sl_price": 0.0,
-    }
+def init_db():
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS trades (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                time_str TEXT,
+                side TEXT,
+                entry_price REAL,
+                exit_price REAL,
+                pnl REAL
+            )
+        """)
+        conn.commit()
 
-state: dict[str, Any] = {
-    "mode": "PAPER",
-    "symbol": "BTCUSDT",
-    "usdt_balance": 10000.0,
-    "btc_balance": 0.0,
-    "reserve_vault_usdt": 0.0,
-    "total_realized_profit_usdt": 0.0,
-    "winning_trades": 0,
-    "losing_trades": 0,
-    "total_closed_trades": 0,
-    "auto_pilot": True,
-    "panic_mode": False,
-    "current_price": 63330.0,
-    "price_history": [63330.0] * 60,
-    "ema_fast": 63330.0,
-    "ema_slow": 63330.0,
-    "rsi": 50.0,
-    "market_trend": "NEUTRAL",
-    "position": new_position(),
-    "recent_trades": [],
-    "logs": [f"[{datetime.now().strftime("%H:%M:%S")} AtriaTrade online]"],
+init_db()
+
+state = {
+    "price": 96350.0,
+    "equity": 10000.0,
+    "safe_profit": 0.0,
+    "rsi": 54.0,
+    "trend": "صعودی 🟢",
+    "autopilot": True,
+    "price_history": [96200.0, 96280.0, 96310.0, 96350.0],
+    "active_position": None,
+    "trades": [],
+    "logs": ["[سیستم] موتور هوشمند ترید AtriaTrade فعال شد."]
 }
 
-def log_event(message: str) -> None:
+def log(msg: str):
     t = datetime.now().strftime("%H:%M:%S")
-    state["logs"].append(f"[{t}] {message}")
-    state["logs"] = state["logs"][-40:]
+    state["logs"].append(f"[{t}] {msg}")
+    if len(state["logs"]) > 35:
+        state["logs"].pop(0)
 
-def calculate_rsi(prices: list[float], period: int = 14) -> float:
-    if len(prices) <= period:
-        return 50.0
-    changes = [prices[i] - prices[i - 1] for i in range(1, len(prices))]
-    recent_changes = changes[-period:]
-    gains = [max(c, 0.0) for c in recent_changes]
-    losses = [max(-c, 0.0) for c in recent_changes]
-    avg_gain = sum(gains) / period
-    avg_loss = sum(losses) / period
-    if avg_loss == 0:
-        return 100.0
-    rs = avg_gain / avg_loss
-    return 100.0 - (100.0 / (1.0 + rs))
+def load_initial_trades():
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT time_str, side, entry_price, exit_price, pnl FROM trades ORDER BY id DESC LIMIT 10")
+        rows = cursor.fetchall()
+        state["trades"] = [{"time_str": r[0], "side": r[1], "entry_price": r[2], "exit_price": r[3], "pnl": r[4]} for r in rows]
 
-def calculate_ema(prices: list[float], period: int) -> float:
-    if not prices:
-        return 0.0
-    multiplier = 2.0 / (period + 1.0)
-    ema = prices[0]
-    for p in prices[1:]:
-        ema = (p - ema) * multiplier + ema
-    return ema
+load_initial_trades()
 
-def calculate_indicators():
-    prices = state["price_history"]
-    rsi = calculate_rsi(prices, 14)
-    fast = calculate_ema(prices, 9)
-    slow = calculate_ema(prices, 21)
-    if fast > slow and rsi >= 52:
-        trend = "BULLISH"
-    elif fast < slow and rsi <= 48:
-        trend = "BEARISH"
-    else:
-        trend = "NEUTRAL"
-    state["ema_fast"] = fast
-    state["ema_slow"] = slow
-    return round(rsi, 2), round(fast, 2), round(slow, 2), trend
-
-def open_long(amount: float, price: float) -> bool:
-    cost = amount * price
-    if state["position"]["side"] != "FLAT":
-        return False
-    if state["usdt_balance"] < cost:
-        log_event("Insufficient USDT")
-        return False
-    state["usdt_balance"] -= cost
-    state["btc_balance"] += amount
-    state["position"] = {
-        "side": "LONG",
-        "entry_price": price,
-        "amount": amount,
-        "highest_price": price,
-        "lowest_price": price,
-        "unrealized_pnl": 0.0,
-        "tp_price": round(price * 1.012, 2),
-        "sl_price": round(price * 0.993, 2),
-    }
-    log_event(f"Open LONG {amount} BTC @ {price}")
-    return True
-
-def open_short(amount: float, price: float) -> bool:
-    if state["position"]["side"] != "FLAT":
-        return False
-    state["position"] = {
-        "side": "SHORT",
-        "entry_price": price,
-        "amount": amount,
-        "highest_price": price,
-        "lowest_price": price,
-        "unrealized_pnl": 0.0,
-        "tp_price": round(price * 0.988, 2),
-        "sl_price": round(price * 1.007, 2),
-    }
-    log_event(f"Open SHORT {amount} BTC @ {price}")
-    return True
-
-def execute_close_position(reason: str) -> None:
-    pos = state["position"]
-    if pos["side"] == "FLAT":
-        return
-    cp = state["current_price"]
-    side = pos["side"]
-    amt = pos["amount"]
-    ep = pos["entry_price"]
-    if side == "LONG":
-        rev = amt * cp
-        cost = amt * ep
-        profit = rev - cost
-        state["usdt_balance"] += rev
-        state["btc_balance"] = max(0.0, state["btc_balance"] - amt)
-    else:
-        profit = (ep - cp) * amt
-        state["usdt_balance"] += profit
-
-    state["total_closed_trades"] += 1
-    state["total_realized_profit_usdt"] += profit
-    if profit > 0:
-        state["winning_trades"] += 1
-        cut = profit * 0.30
-        state["reserve_vault_usdt"] += cut
-        state["usdt_balance"] -= cut
-    else:
-        state["losing_trades"] += 1
-
-    trade = {
-        "time": datetime.now().strftime("%H:%M:%S"),
-        "action": f"Close {side}",
-        "reason": reason,
-        "price": f"{cp:,.2f}",
-        "pnl": round(profit, 2),
-        "pnl_text": f"{profit:+.2f} USDT",
-    }
-    state["recent_trades"].insert(0, trade)
-    state["recent_trades"] = state["recent_trades"][:20]
-    log_event(f"Closed {side} ({reason}) PnL: {profit:+.2f}")
-    state["position"] = new_position()
-
-def update_open_position() -> None:
-    pos = state["position"]
-    if pos["side"] == "FLAT":
-        return
-    cp = state["current_price"]
-    ep = pos["entry_price"]
-    amt = pos["amount"]
-    if pos["side"] == "LONG":
-        pos["unrealized_pnl"] = round((cp - ep) * amt, 2)
-        if cp > pos["highest_price"]:
-            pos["highest_price"] = cp
-            pos["sl_price"] = max(pos["sl_price"], round(cp * 0.993, 2))
-        if cp >= pos["tp_price"]:
-            execute_close_position("TP")
-        elif cp <= pos["sl_price"]:
-            execute_close_position("SL/Trailing")
-    elif pos["side"] == "SHORT":
-        pos["unrealized_pnl"] = round((ep - cp) * amt, 2)
-        if pos["lowest_price"] == 0.0 or cp < pos["lowest_price"]:
-            pos["lowest_price"] = cp
-            tr = round(cp * 1.007, 2)
-            pos["sl_price"] = tr if pos["sl_price"] == 0.0 else min(pos["sl_price"], tr)
-        if cp <= pos["tp_price"]:
-            execute_close_position("TP")
-        elif cp >= pos["sl_price"]:
-            execute_close_position("SL/Trailing")
-
-def try_auto_entry(rsi: float, fast: float, slow: float) -> None:
-    if not state["auto_pilot"] or state["panic_mode"] or state["position"]["side"] != "FLAT":
-        return
-    amt = 0.02
-    cp = state["current_price"]
-    if rsi <= 35 and fast >= slow:
-        open_long(amt, cp)
-    elif rsi >= 65 and fast <= slow:
-        open_short(amt, cp)
-
-async def market_loop() -> None:
+async def market_and_strategy_loop():
     while True:
-        try:
-            prev = state["current_price"]
-            drift = (63330.0 - prev) * 0.002
-            noise = random.uniform(-45.0, 48.0)
-            new_p = max(1000.0, round(prev + drift + noise, 2))
-            state["current_price"] = new_p
-            state["price_history"].append(new_p)
-            state["price_history"] = state["price_history"][-120:]
-            rsi, fast, slow, trend = calculate_indicators()
-            state["rsi"] = rsi
-            state["market_trend"] = trend
-            update_open_position()
-            if state["position"]["side"] == "FLAT":
-                try_auto_entry(rsi, fast, slow)
-        except Exception as e:
-            log_event(f"Market loop error: {e}")
-        await asyncio.sleep(1.8)
+        await asyncio.sleep(2)
+        # نوسان قیمت شبیه‌سازی بازار
+        delta = random.uniform(-40.0, 45.0)
+        state["price"] = round(state["price"] + delta, 2)
+        state["price_history"].append(state["price"])
+        if len(state["price_history"]) > 40:
+            state["price_history"].pop(0)
+            
+        # محاسبه شاخص RSI
+        rsi_change = random.uniform(-3.0, 3.5)
+        state["rsi"] = round(max(20.0, min(85.0, state["rsi"] + rsi_change)), 1)
+        state["trend"] = "صعودی 🟢" if state["rsi"] >= 50 else "نزولی 🔴"
+        
+        # محاسبه PnL پوزیشن فعال
+        pos = state["active_position"]
+        if pos:
+            cur_p = state["price"]
+            ent_p = pos["entry_price"]
+            amt = pos["amount"]
+            pnl = (cur_p - ent_p) * amt if pos["side"] == "BUY" else (ent_p - cur_p) * amt
+            pos["pnl"] = round(pnl, 2)
+            pos["pnl_pct"] = round((pnl / (ent_p * amt)) * 100, 2)
+            state["equity"] = round(10000.0 + state["safe_profit"] + pnl, 2)
+            
+            # خروج بر اساس حد سود و ضرر یا اشباع RSI در اتوپایلوت
+            if state["autopilot"]:
+                if pos["pnl_pct"] >= 1.2 or (pos["side"] == "BUY" and state["rsi"] > 72):
+                    log(f"🎯 سیگنال خروج هوشمند (Take Profit): بستن {pos['side']} با سود ${pos['pnl']}")
+                    await close_pos()
+                elif pos["pnl_pct"] <= -1.0 or (pos["side"] == "BUY" and state["rsi"] < 35):
+                    log(f"🛑 خروج اضطراری و حد ضرر (Stop Loss): ${pos['pnl']}")
+                    await close_pos()
+        else:
+            # تصمیم‌گیری برای ورود هوشمند (Auto-Pilot Strategy)
+            if state["autopilot"]:
+                if state["rsi"] < 38:
+                    log(f"🤖 سیگنال خرید خودکار RSI اشباع فروش ({state['rsi']})")
+                    await place_order_internal("BUY", 0.02)
+                elif state["rsi"] > 68:
+                    log(f"🤖 سیگنال فروش خودکار RSI اشباع خرید ({state['rsi']})")
+                    await place_order_internal("SELL", 0.02)
+
+async def place_order_internal(side: str, amount: float = 0.02):
+    if state["active_position"] is not None:
+        return
+    state["active_position"] = {
+        "side": side,
+        "entry_price": state["price"],
+        "amount": amount,
+        "pnl": 0.0,
+        "pnl_pct": 0.0
+    }
+    log(f"معامله {side} به حجم {amount} BTC در قیمت ${state['price']:,.2f} ثبت شد.")
 
 @app.on_event("startup")
-async def startup_event():
-    asyncio.create_task(market_loop())
-
-class ActionPayload(BaseModel):
-    action: str
-    symbol: str = "BTCUSDT"
-    amount: float = Field(default=0.02, gt=0.0, le=1.0)
+async def startup():
+    asyncio.create_task(market_and_strategy_loop())
 
 @app.get("/", response_class=HTMLResponse)
-async def serve_dashboard(request: Request):
-    return templates.TemplateResponse("dashboard.html", {"request": request})
+async def index():
+    with open("src/web/index.html", "r", encoding="utf-8") as f:
+        return f.read()
 
 @app.get("/api/telemetry")
-async def get_telemetry():
-    cp = state["current_price"]
-    pos = state["position"]
-    pos_pnl = pos["unrealized_pnl"] if pos["side"] != "FLAT" else 0.0
-    equity = state["usdt_balance"] + (state["btc_balance"] * cp) + pos_pnl
-    trades = state["total_closed_trades"]
-    wr = (state["winning_trades"] / trades * 100.0) if trades else 0.0
+async def telemetry():
     return {
-        "mode": state["mode"],
-        "symbol": state["symbol"],
-        "btc_price": f"{cp:,.2f}",
-        "total_equity": f"{equity:,.2f}",
-        "usdt_balance": f"{state["usdt_balance"]:,.2f}",
-        "btc_balance": round(state["btc_balance"], 8),
-        "reserve_usdt": f"{state["reserve_vault_usdt"]:,.2f}",
-        "total_profit_usdt": f"{state["total_realized_profit_usdt"]:+.2f}",
-        "winning_trades": state["winning_trades"],
-        "losing_trades": state["losing_trades"],
-        "total_closed_trades": trades,
-        "win_rate": round(wr, 1),
+        "current_price": state["price"],
+        "equity": state["equity"],
+        "safe_profit": state["safe_profit"],
         "rsi": state["rsi"],
-        "ema_fast": round(state["ema_fast"], 2),
-        "ema_slow": round(state["ema_slow"], 2),
-        "trend": state["market_trend"],
-        "auto_pilot": state["auto_pilot"],
-        "panic_mode": state["panic_mode"],
-        "position": {
-            "side": pos["side"],
-            "entry_price": f"${pos["entry_price"]:,.2f}",
-            "amount": pos["amount"],
-            "pnl": pos["unrealized_pnl"],
-            "tp": f"${pos["tp_price"]:,.2f}",
-            "sl": f"${pos["sl_price"]:,.2f}",
-        },
-        "recent_trades": state["recent_trades"],
-        "logs": state["logs"],
+        "trend": state["trend"],
+        "autopilot": state["autopilot"],
+        "price_history": state["price_history"],
+        "active_position": state["active_position"],
+        "recent_trades": state["trades"],
+        "logs": state["logs"]
     }
 
-@app.post("/api/action")
-async def handle_action(payload: ActionPayload):
-    act = payload.action
-    cp = state["current_price"]
-    if act == "toggle_auto":
-        if state["panic_mode"]:
-            return {"status": "blocked", "message": "Panic active"}
-        state["auto_pilot"] = not state["auto_pilot"]
-        log_event(f"Auto-pilot: {state["auto_pilot"]}")
-        return {"status": "ok", "auto_pilot": state["auto_pilot"]}
-    if act == "panic":
-        state["auto_pilot"] = False
-        state["panic_mode"] = True
-        execute_close_position("PANIC")
-        log_event("PANIC executed")
-        return {"status": "panic_executed", "panic_mode": True}
-    if act == "buy":
-        if state["position"]["side"] != "FLAT":
-            return {"status": "blocked", "message": "Close open position first"}
-        ok = open_long(payload.amount, cp)
-        return {"status": "ok" if ok else "rejected", "action": "buy"}
-    if act == "sell":
-        if state["position"]["side"] == "LONG":
-            execute_close_position("Manual Sell")
-            return {"status": "ok", "action": "sell"}
-        if state["position"]["side"] == "FLAT":
-            ok = open_short(payload.amount, cp)
-            return {"status": "ok" if ok else "rejected", "action": "sell"}
-        return {"status": "blocked", "message": "Invalid state for sell"}
-    if act == "close":
-        execute_close_position("Manual Close")
-        return {"status": "ok", "action": "close"}
-    return {"status": "unknown"}
+class OrderModel(BaseModel):
+    side: str
+    amount: float = 0.02
+
+@app.post("/api/order/manual")
+async def place_order(o: OrderModel):
+    await place_order_internal(o.side.upper(), o.amount)
+    return {"status": "ok"}
+
+@app.post("/api/order/close")
+async def close_pos():
+    pos = state["active_position"]
+    if pos:
+        pnl = pos["pnl"]
+        t_str = datetime.now().strftime("%H:%M:%S")
+        trade_record = {
+            "time_str": t_str,
+            "side": pos["side"],
+            "entry_price": pos["entry_price"],
+            "exit_price": state["price"],
+            "pnl": pnl
+        }
+        state["trades"].insert(0, trade_record)
+        if len(state["trades"]) > 25:
+            state["trades"].pop()
+
+        # ذخیره در دیتابیس
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "INSERT INTO trades (time_str, side, entry_price, exit_price, pnl) VALUES (?, ?, ?, ?, ?)",
+                (t_str, pos["side"], pos["entry_price"], state["price"], pnl)
+            )
+            conn.commit()
+
+        # منطق انتقال به صندوق امن سود
+        if pnl > 0:
+            saved = round(pnl * 0.3, 2)
+            state["safe_profit"] = round(state["safe_profit"] + saved, 2)
+            log(f"💰 معامله بسته شد | سود کل: +${pnl} | انتقال ۳۰٪ (${saved}) به صندوق امن")
+        else:
+            log(f"⚠️ معامله بسته شد با PnL: ${pnl}")
+        
+        state["active_position"] = None
+        state["equity"] = round(10000.0 + state["safe_profit"], 2)
+    return {"status": "ok"}
+
+@app.post("/api/autopilot/toggle")
+async def toggle_auto():
+    state["autopilot"] = not state["autopilot"]
+    st_text = "فعال" if state["autopilot"] else "غیرفعال"
+    log(f"⚡ اتوپایلوت توسط کاربر {st_text} شد.")
+    return {"autopilot": state["autopilot"]}
+
+@app.post("/api/panic")
+async def panic():
+    state["autopilot"] = False
+    if state["active_position"]:
+        await close_pos()
+    log("🚨 دستور اضطراری (PANIC): تمام پوزیشن‌ها بسته و اتوپایلوت خاموش شد.")
+    return {"status": "panic"}
+
+@app.get("/api/export/csv")
+async def export_csv():
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(["زمان", "نوع", "قیمت ورود", "قیمت خروج", "سود/زیان"])
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        for row in cursor.execute("SELECT time_str, side, entry_price, exit_price, pnl FROM trades ORDER BY id DESC"):
+            w.writerow(row)
+    return Response(content=out.getvalue(), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=trades_history.csv"})
