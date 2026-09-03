@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>AtriaTrade Ultra Pro Dashboard</title>
+    <title>AtriaTrade Ultra Command Center</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
@@ -20,12 +20,10 @@
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         body { background: var(--bg-main); color: var(--text-bright); padding: 12px; font-size: 13px; }
         
-        /* Header */
         .topbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 12px; }
         .logo { font-size: 16px; font-weight: 900; color: #fff; display: flex; align-items: center; gap: 6px; }
-        .status-badge { padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 800; text-transform: uppercase; background: rgba(16, 185, 129, 0.2); color: var(--success); border: 1px solid var(--success); }
+        .status-badge { padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 800; background: rgba(16, 185, 129, 0.2); color: var(--success); border: 1px solid var(--success); }
 
-        /* Metrics Cards */
         .grid-4 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 12px; }
         .stat-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 10px; }
         .stat-card .lbl { font-size: 11px; color: var(--text-dim); margin-bottom: 4px; }
@@ -33,21 +31,27 @@
         .stat-card .val.green { color: var(--success); }
         .stat-card .val.gold { color: #fbbf24; }
 
-        /* Action Buttons Toolbar */
-        .action-bar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 12px; }
-        .btn-act { padding: 10px 4px; border: none; border-radius: 8px; font-size: 12px; font-weight: bold; cursor: pointer; color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; transition: opacity 0.2s; }
-        .btn-act:active { opacity: 0.7; }
-        .btn-start { background: #059669; }
-        .btn-pause { background: #d97706; }
-        .btn-dep { background: #2563eb; }
-        .btn-withdraw { background: #7c3aed; }
-        .btn-panic-full { width: 100%; padding: 12px; background: linear-gradient(90deg, #dc2626, #991b1b); color: white; border: none; border-radius: 10px; font-size: 14px; font-weight: 900; margin-bottom: 12px; cursor: pointer; box-shadow: 0 4px 14px rgba(220, 38, 38, 0.4); }
+        /* Quick Trade / Action Toolbar */
+        .action-bar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 8px; }
+        .btn-act { padding: 10px 4px; border: none; border-radius: 8px; font-size: 12px; font-weight: bold; cursor: pointer; color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: display: flex; align-items: center; gap: 6px; }
+        .status-badge { padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 800; background: rgba(16, 185, 129, 0.2); color: var(--success); border: 1px solid var(--success); }
 
-        /* Chart Section */
-        .panel { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 12px; margin-bottom: 12px; }
-        .panel-title { font-size: 12px; font-weight: 700; color: var(--text-dim); margin-bottom: 8px; display: flex; justify-content: space-between; }
+        .grid-4 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 12px; }
+        .stat-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 10px; }
+        .stat-card .lbl { font-size: 11px; color: var(--text-dim); margin-bottom: 4px; }
+        .stat-card .val { font-size: 17px; font-weight: 800; color: var(--accent); }
+        .stat-card .val.green { color: var(--success); }
+        .stat-card .val.gold { color: #fbbf24; }
 
-        /* Monitoring Row */
+        /* Quick Trade / Action Toolbar */
+        .action-bar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 8px; }
+        .btn-act { padding: 10px 4px; border: none; border-radius: 8px; font-size: 12px; font-weight: bold; cursor: pointer; color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; gap:px; font-weight: 700; color: var(--text-dim); margin-bottom: 8px; display: flex; justify-content: space-between; }
+
+        /* AI Strategy Box */
+        .ai-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; text-align: center; font-size: 11px; }
+        .ai-item { background: #07090e; padding: 8px; border-radius: 8px; border: 1px solid var(--border); }
+        .ai-val { font-size: 13px; font-weight: bold; margin-top: 2px; }
+
         .mon-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
         .mon-box { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 10px; font-size: 11px; }
         .mon-row { display: flex; justify-content: space-between; margin-bottom: 4px; }
@@ -55,13 +59,11 @@
         .mon-status { font-weight: bold; }
         .mon-online { color: var(--success); }
 
-        /* Positions Table */
         .pos-table { width: 100%; border-collapse: collapse; font-size: 11px; text-align: center; }
         .pos-table th { color: var(--text-dim); padding: 6px; border-bottom: 1px solid var(--border); }
-        .pos-table td { padding: 8px 4px; font-family: monospace; font-size: 10px; height: 130px; overflow-y: auto font-weight: 600; }
+        .pos-table td { padding: 8px 4px; font-family: monospace; font-size: 11px; font-weight: 600; }
 
-        /* Live Terminal Logs */
-        .terminal { background: #000; border: 1px solid var(--border); border-radius: 10px; padding: 10px; font-family: monospace; font-size: 10px; height: 130px; overflow-y: auto; text-align: left; dir: ltr; }
+        .terminal { background: #000; border: 1px solid var(--border); border-radius: 10px; padding: 10px; font-family: monospace; font-size: 10px; height: 120px; overflow-y: auto; text-align: left; dir: ltr; }
         .log-line { margin-bottom: 3px; line-height: 1.4; }
         .log-INFO { color: #38bdf8; }
         .log-SUCCESS { color: #4ade80; }
@@ -92,12 +94,56 @@
             <div class="val gold" id="val-reserve">$--</div>
         </div>
         <div class="stat-card">
-            <div class="lbl">سود روزانه (PnL)</div>
+            <div class="lbl">سود کل روزانه (PnL)</div>
             <div class="val green" id="val-pnl">$--</div>
         </div>
     </div>
 
-    <!-- QUICK ACTIONS -->
+    <!-- AI STRATEGY TELEMETRY -->
+    <div class="panel" style="border-color: #2563eb;">
+        <div class="panel-title">
+            <span>🧠 تحلیل هوشمند استراتژی (RSI & Trend)</span>
+            <span id="ai-conf" style="color: var(--success); font-weight: bold;">--</span>
+        </div>
+        <div class="ai-grid">
+            <div class="ai-item">
+                <span style="color: var(--text-dim);">شاخص RSI (14)</span>
+                <div class="ai-val" id="ai-rsi" style="color: var(--accent);">--</div>
+            </div>
+            <div class="ai-item">
+                <span style="color: var(--text-dim);">وضعیت سیگنال</span>
+                <div class="ai-val" id="ai-sig" style="color: var(--success);">--</div>
+            </div>
+            <div class="ai-item">
+                <span style="color: var(--text-dim);">روند بازار</span>
+                <div class="ai-val" id="ai-trend" style="color: #fbbf24; font-size: 11px;">--</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- QUICK MANUAL TRADE -->
+    <div class="trade-bar">
+        <button class="btn-buy" onclick="sendAction('trade_buy')">🟢 خرید دستی سریع (0.02 BTC)</button>
+        <button class="btn-sell" onclick="sendAction('trade_sell')">🔴 فروش دستی سریع (0.02 BTC)</button>
+    </div>
+
+    <!-- CONTROL ACTIONS -->
+    <div class="action-bar">
+        <button class="btn-act btn-start" onclick="sendAction('start')">▶️ شروع</button>
+        <button class="btn-act btn-pause" onclick="sendAction('pause')">⏸ توقف</button>
+        <button class="btn-act btn-dep" onclick="sendAction('deposit')">💳 +1000$</button>
+        <button class="btn-act btn-withdraw" onclick
+            </div>
+        </div>
+    </div>
+
+    <!-- QUICK MANUAL TRADE -->
+    <div class="trade-bar">
+        <button class="btn-buy" onclick="sendAction('trade_buy')">🟢 خرید دستی سریع (0.02 BTC)</button>
+        <button class="btn-sell" onclick="sendAction('trade_sell')">🔴 فروش دستی سریع (0.02 BTC)</button>
+    </div>
+
+    <!-- CONTROL ACTIONS -->
     <div class="action-bar">
         <button class="btn-act btn-start" onclick="sendAction('start')">▶️ شروع</button>
         <button class="btn-act btn-pause" onclick="sendAction('pause')">⏸ توقف</button>
@@ -113,21 +159,14 @@
             <span>📈 نمودار زنده قیمت و روند BTC/USDT</span>
             <span id="chart-tick" style="color: var(--accent);">2s Tick</span>
         </div>
-        <canvas id="ultraChart" height="150"></canvas>
+        <canvas id="ultraChart" height="140"></canvas>
     </div>
 
-    <!-- MONITORING TERMINAL & EXCHANGES -->
+    <!-- HARDWARE & EXCHANGE MONITORING -->
     <div class="mon-grid">
         <div class="mon-box">
             <div style="font-weight: bold; margin-bottom: 6px; color: var(--accent);">📡 وضعیت صرافی‌ها</div>
-            <div class="mon-row"><span>نوبیتکس:</span><span class="mon-status mon-online" id="ex-nobitex">--</span></div>
-            <div class="mon-row"><span>بایننس:</span><span class="mon-status mon-online" id="ex-binance">--</span></div>
-            <div class="mon-row"><span>موتور Paper:</span><span class="mon-status mon-online">فعال</span></div>
-        </div>
-        <div class="mon-box">
-            <div style="font-weight: bold; margin-bottom: 6px; color: var(--accent);">📱 مانیتورینگ Termux</div>
-            <div class="mon-row"><span>پردازنده (CPU):</span><span id="sys-cpu">--</span></div>
-            <div class="mon-row"><span>رم (RAM):</span><span id="sys-ram">--</span></div>
+            <div class="mon-row"><span>نوبیتram">--</span></div>
             <div class="mon-row"><span>آپ‌تایم:</span><span id="sys-uptime">--</span></div>
         </div>
     </div>
@@ -151,7 +190,7 @@
         </table>
     </div>
 
-    <!-- LIVE CONSOLE LOGS -->
+    <!-- LIVE LOGS -->
     <div class="panel" style="margin-bottom: 0;">
         <div class="panel-title">🖥 لاگ‌های زنده سیستم (Real-time Stream)</div>
         <div class="terminal" id="term-logs"></div>
@@ -190,11 +229,16 @@
                 const res = await fetch('/api/telemetry');
                 const data = await res.json();
 
-                // Values
                 document.getElementById('val-price').innerText = '$' + data.price.toLocaleString();
                 document.getElementById('val-balance').innerText = '$' + data.balance.toLocaleString();
                 document.getElementById('val-reserve').innerText = '$' + data.reserve.toLocaleString();
                 document.getElementById('val-pnl').innerText = `+$${data.daily_pnl} (${data.daily_pnl_pct}%)`;
+
+                // AI Strategy Box
+                document.getElementById('ai-conf').innerText = 'اعتماد تحلیل: ' + data.tech.ai_confidence;
+                document.getElementById('ai-rsi').innerText = data.tech.rsi;
+                document.getElementById('ai-sig').innerText = data.tech.macd_signal;
+                document.getElementById('ai-trend').innerText = data.tech.market_trend;
 
                 // Status Badge
                 const badge = document.getElementById('bot-badge');
@@ -225,19 +269,20 @@
                 document.getElementById('sys-ram').innerText = data.system_metrics.termux_ram;
                 document.getElementById('sys-uptime').innerText = data.uptime;
 
-                // Positions
+                // Positions Table
                 let posHtml = '';
                 if(data.positions.length === 0) {
                     posHtml = '<tr><td colspan="5" style="color: var(--text-dim); padding: 12px;">هیچ پوزیشن بازی وجود ندارد.</td></tr>';
                 } else {
                     data.positions.forEach(p => {
                         const pnlClass = p.pnl >= 0 ? 'color: var(--success)' : 'color: var(--danger)';
+                        const sign = p.pnl >= 0 ? '+' : '';
                         posHtml += `<tr>
                             <td>${p.symbol}</td>
                             <td style="color: ${p.side === 'BUY' ? 'var(--success)' : 'var(--danger)'}">${p.side}</td>
                             <td>$${p.entry}</td>
                             <td>$${p.current}</td>
-                            <td style="${pnlClass}">+$${p.pnl} (${p.pnl_pct}%)</td>
+                            <td style="${pnlClass}">${sign}$${p.pnl} (${p.pnl_pct}%)</td>
                         </tr>`;
                     });
                 }
@@ -253,15 +298,14 @@
                 term.scrollTop = term.scrollHeight;
 
             } catch(e) {
-                console.error("Telemetry fetch error:", e);
+                console.error("Telemetry error:", e);
             }
         }
 
         async function sendAction(act) {
-            if(act === 'panic' && !confirm("آیا از خروج اضطراری و نقد کردن همه مطمئن هستید؟")) return;
+            if(act === 'panic' && !confirm("آیا از خروج اضطراری مطمئن هستید؟")) return;
             try {
-                const res = await fetch(`/api/action/${act}`, { method: 'POST' });
-                const r = await res.json();
+                await fetch(`/api/action/${act}`, { method: 'POST' });
                 pollTelemetry();
             } catch(e) {
                 alert("خطا در ارسال دستور");
