@@ -6,19 +6,13 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 
-# تعیین مسیر پایه‌ای پروژه
-BASE_DIR = Path(__file__).resolve().parent.parent.parent
-WEB_DIR = BASE_DIR / "src" / "web"
+# مسیردهی پویا برای Termux
+WEB_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = WEB_DIR / "templates"
 STATIC_DIR = WEB_DIR / "static"
 
-app = FastAPI(
-    title="AtriaTrade Dashboard",
-    description="Institutional-grade Trading Bot Interface",
-    version="1.0.0"
-)
+app = FastAPI(title="AtriaTrade Dashboard")
 
-# تنظیمات امنیتی و CORS (برای ارتباط راحت فرانت‌اند و بک‌اند)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -27,19 +21,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# متصل کردن پوشه‌های فایل‌های ظاهری (CSS/JS) و قالب‌ها
+# mount static files
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
-    """رندر کردن صفحه اصلی داشبورد معاملاتی"""
-    return templates.TemplateResponse(
-        "index.html", 
-        {"request": request, "status": "Paper Mode (Safe)"}
-    )
+    return templates.TemplateResponse("index.html", {"request": request, "status": "Paper Mode (Safe)"})
 
 @app.get("/health")
 async def health_check():
-    """پایش سلامت سرور و ربات"""
     return {"status": "ok", "mode": "Paper Trading", "security": "No Real API Keys"}

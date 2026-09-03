@@ -39,12 +39,24 @@ class PortfolioManager:
     def balance(self) -> float:
         return float(self.cash)
 
+    def get_balance(self, asset: Optional[str] = None) -> float:
+        """برگرداندن موجودی نقد یا دارایی مشخص شده برای سازگاری با تست‌ها و موتور"""
+        if asset is None or asset.upper() in ["USDT", "USD", "IRR", "CASH", "TOTAL"]:
+            return float(self.balance)
+        return float(self.get_holding_quantity(asset))
+
+
     @staticmethod
     def _symbol(symbol: str) -> str:
         return str(symbol).strip().upper()
 
     def get_holding_quantity(self, symbol: str) -> float:
         return float(self.holdings.get(self._symbol(symbol), 0.0))
+
+    def get_position(self, symbol: str) -> float:
+        """برگرداندن حجم پوزیشن باز برای سازگاری با تست‌ها"""
+        return float(self.get_holding_quantity(symbol))
+
 
     def calculate_total_equity(
         self,
