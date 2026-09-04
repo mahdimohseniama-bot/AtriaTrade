@@ -1,0 +1,100 @@
+import logging
+
+class SMACrossStrategy:
+    def __init__(self, engine=None, short_window: int = 3, long_window: int = 6):
+        self.name = "SMACrossStrategy"
+        self.engine = engine
+        self.short_window = short_window
+        self.long_window = long_window
+        self.prices = []
+        self.logger = logging.getLogger("SMACrossStrategy")
+
+    def start(self):
+        self.logger.info("SMACrossStrategy started.")
+
+    def stop(self):
+        self.logger.info("SMACrossStrategy stopped.")
+
+    def _get_position(self, symbol: str) -> float:
+        if self.engine is None:
+            return 0.0
+        portfolio = getattr(self.engine, 'portfolio', {})
+        if isinstance(portfolio, dict):
+            return float(portfolio.get(symbol, 0.0))
+        return 0.0
+
+    def generate_signal(self, current_price: float) -> str:
+        self.prices.append(current_price)
+        if len(self.prices) > self.long_window + 10:
+            self.prices.pop(0)
+
+        if len(self.prices) < self.long_window:
+            return "HOLD"
+
+        short_avg = sum(self.prices[-self.short_window:]) / self.short_window
+        long_avg = sum(self.prices[-self.long_window:]) / self.long_window
+
+        if short_avg > long_avg:
+            return "BUY"
+        elif short_avg < long_avg:
+            return "SELL"
+        return "HOLD"
+
+    def on_tick(self, tick: dict):
+        if not isinstance(tick, dict) or 'price' not in tick:
+            return
+
+        price = float(tick['price'])
+        symbol = tick.get('symbol', 'BTCUSDT')
+        self.prices.append(price)
+
+        if len(self.prices) > self.long_window + 10:
+            self.prices.pop(0)
+
+        if len(self.prices) < self.long_window:
+            return
+
+        short_avg = sum(self.prices[-self.short_window:]) / self.short_window
+        long_avg = sum(self.prices[-self.long_window:]) / self.long_window
+
+        current_pos = self._get_position(symbol)
+
+        # سیگنال خرید
+        if short_avg > long_avg and current_pos <= 0:
+            self.logger.info(f"Signal BUY generated for {symbol} @ {price}")
+            signal = {
+                "symbol": symbol,
+                "side": "BUY",
+                "qty": 1.0,
+                "price": price
+            }
+            self._dispatch_signal(signal)
+
+        # سیگنال فروش
+        elif short_avg < long_avg and current_pos > 0:
+            self.logger.info(f"Signal SELL generated for {symbol} @ {price}")
+            signal = {
+                "symbol": symbol,
+                "side": "SELL",
+                "qty": 1.0,
+                "price": price
+            }
+            self._dispatch_signal(signal)
+
+    def _dispatch_signal(self, signal: dict):
+        if self.engine is None:
+            return
+
+        if hasattr(self.engine, 'handle_strategy_signal'):
+            self.engine.handle_strategy_signal(self.name, signal)
+        elif hasattr(self.engine, 'process_signal'):
+            self.engine.process_signal(signal)
+        elif hasattr(self.engine, 'executor') and hasattr(self.engine.executor, 'execute_market_order'):
+            self.engine.executor.execute_market_order(
+                signal.get('side'),
+                signal.get('symbol'),
+                signal.get('qty'),
+                signal.get('price')
+            )
+        else:
+            self.logger.error("TradingEngine signal handler not found!")

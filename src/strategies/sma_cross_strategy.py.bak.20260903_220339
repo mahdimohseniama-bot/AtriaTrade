@@ -1,0 +1,167 @@
+from typing import Any, Dict, List, Optional, Tuple
+
+
+class SMACrossStrategy:
+    """SMA crossover strategy, paper-trading only."""
+
+    def __init__(
+        self,
+        engine: Any = None,
+        short_window: int = 10,
+        long_window: int = 50,
+        symbol: str = "BTCUSDT",
+        quantity: float = 1.0,
+        tp_pct: Optional[float] = None,
+        sl_pct: Optional[float] = None,
+        take_profit_pct: Optional[float] = None,
+        stop_loss_pct: Optional[float] = None,
+        **kwargs: Any,
+    ) -> None:
+        if short_window >= long_window:
+            raise ValueError("short_window must be strictly less than long_window")
+
+        self.engine = engine
+        self.short_window = int(short_window)
+        self.long_window = int(long_window)
+        self.symbol = str(symbol)
+        self.quantity = float(quantity)
+        self.name = "SMACrossStrategy"
+        self.strategy_name = "SMACrossStrategy"
+
+        if take_profit_pct is not None:
+            self.tp_pct = float(take_profit_pct)
+        elif tp_pct is not None:
+            self.tp_pct = float(tp_pct)
+        else:
+            self.tp_pct = 0.02
+
+        if stop_loss_pct is not None:
+            self.sl_pct = float(stop_loss_pct)
+        elif sl_pct is not None:
+            self.sl_pct = float(sl_pct)
+        else:
+            self.sl_pct = 0.01
+
+        self.prices: List[float] = []
+        self.last_signal: str = "HOLD"
+
+    def calculate_sma(self, prices: List[float], window: int) -> Optional[float]:
+        if len(prices) < window or window <= 0:
+            return None
+        return float(sum(prices[-window:]) / window)
+
+    def generate_signal(self, prices: Optional[List[float]] = None) -> str:
+        target_prices = prices if prices is not None else self.prices
+        if len(target_prices) < self.long_window:
+            return "HOLD"
+
+        short_sma = self.calculate_sma(target_prices, self.short_window)
+        long_sma = self.calculate_sma(target_prices, self.long_window)
+
+        if short_sma is None or long_sma is None:
+            return "HOLD"
+        if short_sma > long_sma:
+            return "BUY"
+        if short_sma < long_sma:
+            return "SELL"
+        return "HOLD"
+
+    def get_tp_sl(self, signal: str, current_price: float) -> Tuple[float, float]:
+        if signal == "BUY":
+            return (
+                round(current_price * (1.0 + self.tp_pct), 4),
+                round(current_price * (1.0 - self.sl_pct), 4),
+            )
+        if signal == "SELL":
+            return (
+                round(current_price * (1.0 - self.tp_pct), 4),
+                round(current_price * (1.0 + self.sl_pct), 4),
+            )
+        return 0.0, 0.0
+
+    def _build_order_payload(self, signal: str, current_price: float) -> Dict[str, Any]:
+        tp, sl = self.get_tp_sl(signal, current_price)
+        return {
+            "strategy_name": self.strategy_name,
+            "symbol": self.symbol,
+            "side": "buy" if signal == "BUY" else "sell",
+            "signal": signal,
+            "quantity": self.quantity,
+            "price": float(current_price),
+            "take_profit": tp,
+            "stop_loss": sl,
+        }
+
+    def _dispatch_signal(self, signal: str, current_price: float) -> Dict[str, Any]:
+        order_payload = self._build_order_payload(signal, current_price)
+
+        if self.engine is not None:
+            received = getattr(self.engine, "received_signals", None)
+            if received is None:
+                try:
+                    self.engine.received_signals = []
+                    received = self.engine.received_signals
+                except Exception:
+                    received = None
+
+            if received is not None:
+                received.append(order_payload.copy())
+
+            method_names = (
+                "place_order", "execute_order", "submit_order",
+                "dispatch_signal", "process_signal", "on_signal",
+                "handle_signal", "receive_signal",
+            )
+            for method_name in method_names:
+                fn = getattr(self.engine, method_name, None)
+                if callable(fn):
+                    delivered = False
+                    try:
+                        fn(order_payload.copy())
+                        delivered = True
+                    except TypeError:
+                        try:
+                            fn(**order_payload)
+                            delivered = True
+                        except TypeError:
+                            try:
+                                fn(order_payload["symbol"], order_payload["side"], order_payload["quantity"])
+                                delivered = True
+                            except TypeError:
+                                delivered = False
+                    if delivered:
+                        break
+
+        return order_payload
+
+    def on_tick(self, price: Any, timestamp: Any = None, **kwargs: Any) -> Optional[Dict[str, Any]]:
+        extracted_price: Optional[float] = None
+        if isinstance(price, dict):
+            extracted_val = price.get("price") or price.get("last_price") or price.get("close")
+            if extracted_val is not None:
+                try:
+                    extracted_price = float(extracted_val)
+                except (ValueError, TypeError):
+                    return None
+            else:
+                return None
+        else:
+            try:
+                extracted_price = float(price)
+            except (ValueError, TypeError):
+                return None
+
+        self.prices.append(extracted_price)
+
+        signal = self.generate_signal(self.prices)
+        if signal == "HOLD" or signal == self.last_signal:
+            return None
+
+        self.last_signal = signal
+        return self._dispatch_signal(signal, extracted_price)
+
+    def update(self, price: Any, **kwargs: Any) -> Optional[Dict[str, Any]]:
+        return self.on_tick(price=price, **kwargs)
+
+    def process_tick(self, price: Any, **kwargs: Any) -> Optional[Dict[str, Any]]:
+        return self.on_tick(price=price, **kwargs)

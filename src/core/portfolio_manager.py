@@ -1,299 +1,167 @@
-from __future__ import annotations
+import logging
+from typing import Dict, Any, Optional
 
-from typing import Any, Dict, Optional
-
+logger = logging.getLogger(__name__)
 
 class PortfolioManager:
-    def __init__(
-        self,
-        initial_balance: Optional[float] = None,
-        initial_cash: Optional[float] = None,
-        max_asset_weight: float = 1.0,
-        **kwargs: Any,
-    ) -> None:
-        if initial_cash is not None:
-            starting_cash = float(initial_cash)
-        elif initial_balance is not None:
-            starting_cash = float(initial_balance)
-        else:
-            starting_cash = 10000.0
-
-        if starting_cash < 0:
-            raise ValueError("initial cash cannot be negative")
-
-        if not 0 < float(max_asset_weight) <= 1:
-            raise ValueError("max_asset_weight must be between 0 and 1")
-
-        self.initial_balance = starting_cash
-        self.initial_cash = starting_cash
-        self.cash = starting_cash
-        self.max_asset_weight = float(max_asset_weight)
-        self.peak_equity = starting_cash
-
-        self.holdings: Dict[str, float] = {}
-        self.history: list[Dict[str, Any]] = []
-
-        self._asset_cost_basis: Dict[str, float] = {}
+    def __init__(self, initial_cash: float = 10000.0, max_asset_weight: float = 0.5, **kwargs):
+        self.cash: float = float(kwargs.get("initial_balance", initial_cash))
+        self.max_asset_weight: float = float(max_asset_weight)
+        self.positions: Dict[str, Dict[str, float]] = {}
+        self.peak_equity: float = self.cash
+        self.equity: float = self.cash
+        self.drawdown: float = 0.0
+        self.realized_pnl: float = 0.0
+        self.trade_count: int = 0
 
     @property
-    def balance(self) -> float:
-        return float(self.cash)
+    def holdings(self) -> Dict[str, Dict[str, float]]:
+        return self.positions
 
-    def get_balance(self, asset: Optional[str] = None) -> float:
-        """برگرداندن موجودی نقد یا دارایی مشخص شده برای سازگاری با تست‌ها و موتور"""
-        if asset is None or asset.upper() in ["USDT", "USD", "IRR", "CASH", "TOTAL"]:
-            return float(self.balance)
-        return float(self.get_holding_quantity(asset))
-
-
-    @staticmethod
-    def _symbol(symbol: str) -> str:
-        return str(symbol).strip().upper()
-
-    def get_holding_quantity(self, symbol: str) -> float:
-        return float(self.holdings.get(self._symbol(symbol), 0.0))
+    def get_balance(self) -> float:
+        return self.cash
 
     def get_position(self, symbol: str) -> float:
-        """برگرداندن حجم پوزیشن باز برای سازگاری با تست‌ها"""
-        return float(self.get_holding_quantity(symbol))
+        pos = self.positions.get(symbol, 0.0)
+        if isinstance(pos, dict):
+            return float(pos.get("quantity", 0.0))
+        return float(pos)
 
+    def get_holding_quantity(self, symbol: str) -> float:
+        return self.get_position(symbol)
 
-    def calculate_total_equity(
-        self,
-        price_map: Optional[Dict[str, float]] = None,
-    ) -> float:
-        prices = price_map or {}
-        holdings_value = 0.0
+    def get_equity(self, current_prices: Optional[Dict[str, float]] = None) -> float:
+        if current_prices is None:
+            current_prices = {}
+        total = self.cash
+        for sym, pos in self.positions.items():
+            qty = pos.get("quantity", 0.0) if isinstance(pos, dict) else float(pos)
+            price = current_prices.get(sym, pos.get("avg_price", 0.0) if isinstance(pos, dict) else 0.0)
+            total += qty * price
+        self.equity = total
+        if total > self.peak_equity:
+            self.peak_equity = total
+        self.calculate_drawdown(self.equity)
+        return self.equity
 
-        for symbol, quantity in self.holdings.items():
-            price = float(prices.get(symbol, 0.0))
-            holdings_value += quantity * price
+    def calculate_total_equity(self, current_prices: Optional[Dict[str, float]] = None) -> float:
+        return self.get_equity(current_prices)
 
-        total_equity = float(self.cash + holdings_value)
-
-        if total_equity > self.peak_equity:
-            self.peak_equity = total_equity
-
-        return total_equity
-
-    def get_total_value(
-        self,
-        price_map: Optional[Dict[str, float]] = None,
-    ) -> float:
-        return self.calculate_total_equity(price_map)
-
-    def calculate_drawdown(self, equity: float) -> float:
-        current_equity = float(equity)
-
-        if current_equity > self.peak_equity:
-            self.peak_equity = current_equity
-            return 0.0
+    def calculate_drawdown(self, equity_val: Optional[Any] = None) -> float:
+        if isinstance(equity_val, (int, float)):
+            current_eq = float(equity_val)
+        elif isinstance(equity_val, dict):
+            current_eq = self.get_equity(equity_val)
+        else:
+            current_eq = self.equity
 
         if self.peak_equity <= 0:
+            self.drawdown = 0.0
             return 0.0
 
-        return float(
-            (self.peak_equity - current_equity)
-            / self.peak_equity
-            * 100.0
-        )
+        dd = ((self.peak_equity - current_eq) / self.peak_equity) * 100.0
+        self.drawdown = max(0.0, dd)
+        return self.drawdown
 
-    def can_allocate(self, *args: Any, **kwargs: Any) -> Any:
-        """
-        New API:
-            can_allocate(symbol, amount, price_map) -> dict
+    def get_summary(self, current_prices: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
+        equity = self.get_equity(current_prices)
+        dd_pct = self.calculate_drawdown(equity)
+        return {
+            "cash": self.cash,
+            "total_equity": equity,
+            "equity": equity,
+            "drawdown": dd_pct / 100.0,
+            "drawdown_pct": dd_pct,
+            "peak_equity": self.peak_equity,
+            "realized_pnl": self.realized_pnl,
+            "trade_count": self.trade_count,
+            "positions": self.positions
+        }
 
-        Legacy API:
-            can_allocate(cost)
-            can_allocate(symbol, amount)
-            can_allocate(symbol, quantity, price)
-            -> bool
-        """
-        if len(args) >= 3 and isinstance(args[2], dict):
-            symbol = self._symbol(args[0])
-            additional_amount = float(args[1])
-            prices = args[2]
+    def can_allocate(self, symbol: str, amount: float, current_prices: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
+        equity = self.get_equity(current_prices)
+        max_allowed = equity * self.max_asset_weight
+        current_holding_val = 0.0
+        if symbol in self.positions:
+            pos = self.positions[symbol]
+            qty = pos.get("quantity", 0.0) if isinstance(pos, dict) else float(pos)
+            px = (current_prices or {}).get(symbol, pos.get("avg_price", 0.0) if isinstance(pos, dict) else 0.0)
+            current_holding_val = qty * px
 
-            if additional_amount < 0:
-                return {
-                    "allowed": False,
-                    "reason": "Amount cannot be negative",
-                }
-
-            total_equity = self.calculate_total_equity(prices)
-
-            if total_equity <= 0:
-                return {
-                    "allowed": False,
-                    "reason": "Portfolio equity must be positive",
-                }
-
-            existing_value = (
-                self.get_holding_quantity(symbol)
-                * float(prices.get(symbol, 0.0))
-            )
-
-            proposed_value = existing_value + additional_amount
-            max_value = total_equity * self.max_asset_weight
-
-            allowed = proposed_value <= max_value
-
+        if (current_holding_val + amount) > max_allowed:
             return {
-                "allowed": bool(allowed),
-                "reason": (
-                    ""
-                    if allowed
-                    else "Exceeds max asset weight"
-                ),
-                "symbol": symbol,
-                "current_asset_value": float(existing_value),
-                "proposed_asset_value": float(proposed_value),
-                "max_asset_value": float(max_value),
+                "allowed": False,
+                "reason": f"Exceeds max asset weight limit ({self.max_asset_weight * 100}%)"
             }
+        if amount > self.cash:
+            return {
+                "allowed": False,
+                "reason": "Insufficient cash balance"
+            }
+        return {"allowed": True, "reason": "OK"}
 
-        cost = 0.0
-
-        if len(args) == 1:
-            cost = float(args[0])
-        elif len(args) == 2:
-            cost = float(args[1])
-        elif len(args) >= 3:
-            cost = float(args[1]) * float(args[2])
-        elif "cost" in kwargs:
-            cost = float(kwargs["cost"])
-        elif "quantity" in kwargs and "price" in kwargs:
-            cost = float(kwargs["quantity"]) * float(kwargs["price"])
-        elif "amount" in kwargs:
-            cost = float(kwargs["amount"])
-
-        return self.cash >= cost
-
-    def record_buy(
-        self,
-        symbol: str,
-        quantity: float,
-        price: float,
-        fee: float = 0.0,
-    ) -> Dict[str, Any]:
-        sym = self._symbol(symbol)
-        qty = float(quantity)
-        unit_price = float(price)
-        fee_value = float(fee)
-
-        if qty <= 0 or unit_price <= 0 or fee_value < 0:
-            raise ValueError("quantity and price must be positive")
-
-        total_cost = qty * unit_price + fee_value
-
+    def record_buy(self, symbol: str, quantity: float, price: float, fee: float = 0.0) -> Dict[str, Any]:
+        total_cost = (quantity * price) + fee
         if self.cash < total_cost:
             return {
-                "status": "FAILED",
-                "reason": "Insufficient funds",
-                "total_cost": float(total_cost),
+                "status": "REJECTED",
+                "reason": "Insufficient cash to cover cost and fees"
             }
-
-        previous_qty = self.holdings.get(sym, 0.0)
-        previous_basis = self._asset_cost_basis.get(sym, 0.0)
 
         self.cash -= total_cost
-        self.holdings[sym] = previous_qty + qty
-        self._asset_cost_basis[sym] = previous_basis + total_cost
+        if symbol not in self.positions:
+            self.positions[symbol] = {"quantity": quantity, "avg_price": price}
+        else:
+            current_pos = self.positions[symbol]
+            old_qty = current_pos["quantity"]
+            old_avg = current_pos["avg_price"]
+            new_qty = old_qty + quantity
+            new_avg = ((old_qty * old_avg) + (quantity * price)) / new_qty if new_qty > 0 else price
+            self.positions[symbol] = {"quantity": new_qty, "avg_price": new_avg}
 
-        record = {
+        self.trade_count += 1
+        return {
+            "status": "FILLED",
             "action": "BUY",
-            "symbol": sym,
-            "quantity": qty,
-            "price": unit_price,
-            "fee": fee_value,
-            "total_cost": float(total_cost),
-            "remaining_cash": float(self.cash),
+            "symbol": symbol,
+            "quantity": quantity,
+            "price": price,
+            "fee": fee,
+            "total_cost": total_cost,
+            "cost": total_cost,
+            "cash": self.cash
         }
 
-        self.history.append(record)
-        return record
-
-    def record_sell(
-        self,
-        symbol: str,
-        quantity: float,
-        price: float,
-        fee: float = 0.0,
-    ) -> Dict[str, Any]:
-        sym = self._symbol(symbol)
-        qty = float(quantity)
-        unit_price = float(price)
-        fee_value = float(fee)
-
-        if qty <= 0 or unit_price <= 0 or fee_value < 0:
-            raise ValueError("quantity and price must be positive")
-
-        current_qty = self.holdings.get(sym, 0.0)
-
-        if current_qty < qty:
+    def record_sell(self, symbol: str, quantity: float, price: float, fee: float = 0.0) -> Dict[str, Any]:
+        current_qty = self.get_position(symbol)
+        if current_qty < quantity or quantity <= 0:
             return {
-                "status": "FAILED",
-                "reason": "Insufficient holdings",
-                "holding": float(current_qty),
+                "status": "REJECTED",
+                "reason": "Insufficient position quantity to sell"
             }
 
-        current_basis = self._asset_cost_basis.get(sym, 0.0)
-        cost_basis_sold = current_basis * (qty / current_qty)
-        total_proceeds = qty * unit_price - fee_value
-        realized_pnl = total_proceeds - cost_basis_sold
+        pos = self.positions[symbol]
+        avg_price = pos["avg_price"]
+        pnl = (price - avg_price) * quantity - fee
 
-        remaining_qty = current_qty - qty
-        remaining_basis = current_basis - cost_basis_sold
+        proceeds = (quantity * price) - fee
+        self.cash += proceeds
+        self.realized_pnl += pnl
 
-        if remaining_qty <= 1e-12:
-            self.holdings.pop(sym, None)
-            self._asset_cost_basis.pop(sym, None)
+        remaining_qty = current_qty - quantity
+        if remaining_qty <= 1e-8:
+            self.positions.pop(symbol, None)
         else:
-            self.holdings[sym] = remaining_qty
-            self._asset_cost_basis[sym] = remaining_basis
+            self.positions[symbol]["quantity"] = remaining_qty
 
-        self.cash += total_proceeds
-
-        record = {
+        self.trade_count += 1
+        return {
+            "status": "FILLED",
             "action": "SELL",
-            "symbol": sym,
-            "quantity": qty,
-            "price": unit_price,
-            "fee": fee_value,
-            "total_proceeds": float(total_proceeds),
-            "realized_pnl": float(realized_pnl),
-            "remaining_cash": float(self.cash),
-        }
-
-        self.history.append(record)
-        return record
-
-    def get_summary(
-        self,
-        price_map: Optional[Dict[str, float]] = None,
-    ) -> Dict[str, Any]:
-        total_equity = self.calculate_total_equity(price_map)
-        drawdown_pct = self.calculate_drawdown(total_equity)
-
-        return {
-            "cash": float(self.cash),
-            "holdings": self.holdings.copy(),
-            "total_equity": float(total_equity),
-            "peak_equity": float(self.peak_equity),
-            "drawdown_pct": float(drawdown_pct),
-            "unrealized_profit": float(
-                total_equity - self.initial_cash
-            ),
-        }
-
-    def get_portfolio_summary(
-        self,
-        price_map: Optional[Dict[str, float]] = None,
-    ) -> Dict[str, Any]:
-        summary = self.get_summary(price_map)
-
-        return {
-            "cash": summary["cash"],
-            "holdings": summary["holdings"],
-            "total_value": summary["total_equity"],
-            "unrealized_profit": summary["unrealized_profit"],
+            "symbol": symbol,
+            "quantity": quantity,
+            "price": price,
+            "fee": fee,
+            "realized_pnl": pnl,
+            "cash": self.cash
         }

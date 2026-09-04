@@ -1,0 +1,47 @@
+from typing import Any, Dict, List, Optional
+
+
+class TradingEngine:
+    """Core paper trading engine."""
+
+    def __init__(
+        self,
+        portfolio_manager: Any = None,
+        risk_manager: Any = None,
+        order_executor: Any = None,
+        profit_reserve_manager: Any = None,
+        portfolio: Any = None,
+        risk: Any = None,
+        executor: Any = None,
+        reserve: Any = None,
+        **kwargs: Any,
+    ) -> None:
+        self.portfolio_manager = portfolio or portfolio_manager
+        self.risk_manager = risk or risk_manager
+        self.order_executor = executor or order_executor
+        self.profit_reserve_manager = reserve or profit_reserve_manager
+
+        self.is_running: bool = False
+        self.received_signals: List[Dict[str, Any]] = []
+
+    def start(self) -> bool:
+        self.is_running = True
+        return self.is_running
+
+    def stop(self) -> bool:
+        self.is_running = False
+        return not self.is_running
+
+    def process_tick(self, tick_data: Any, **kwargs: Any) -> Optional[Dict[str, Any]]:
+        return None
+
+    def place_order(self, order_data: Dict[str, Any]) -> Any:
+        self.received_signals.append(order_data)
+        if self.order_executor is not None:
+            fn = getattr(self.order_executor, "create_paper_order", None) or getattr(self.order_executor, "execute_order", None)
+            if callable(fn):
+                try:
+                    return fn(order_data)
+                except TypeError:
+                    return fn(**order_data)
+        return order_data
