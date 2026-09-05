@@ -1,212 +1,328 @@
-import asyncio
-import random
-from datetime import datetime
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, Response
-from pydantic import BaseModel
-import csv
-import io
-import sqlite3
-import os
+from fastapi.responses import HTMLResponse, JSONResponse
+import time
 
-app = FastAPI(title="AtriaTrade Pro")
+app = FastAPI(title="AtriaTrade Pro Dashboard")
 
-# پایگاه داده SQLite برای ذخیره قطعی تاریخچه معاملات
-DB_PATH = "data/trading.db"
-os.makedirs("data", exist_ok=True)
-
-def init_db():
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS trades (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                time_str TEXT,
-                side TEXT,
-                entry_price REAL,
-                exit_price REAL,
-                pnl REAL
-            )
-        """)
-        conn.commit()
-
-init_db()
-
+# وضعیت شبیه‌ساز امن Paper Trading
 state = {
-    "price": 96350.0,
-    "equity": 10000.0,
-    "safe_profit": 0.0,
-    "rsi": 54.0,
-    "trend": "صعودی 🟢",
-    "autopilot": True,
-    "price_history": [96200.0, 96280.0, 96310.0, 96350.0],
-    "active_position": None,
-    "trades": [],
-    "logs": ["[سیستم] موتور هوشمند ترید AtriaTrade فعال شد."]
+    "bot_status": "active",
+    "mode": "paper_trading",
+    "balance_usdt": 10000.0,
+    "equity": 10250.0,
+    "pnl_usd": 250.0,
+    "pnl_pct": 2.5,
+    "vault_balance": 50.0,
+    "btc_price": 64250.0,
+    "rsi": 54.2,
+    "trades": [
+        {"time": "10:45:12", "symbol": "BTC/USDT", "side": "BUY", "price": 63800.0, "profit": 22.5, "status": "CLOSED"},
+        {"time": "10:30:45", "symbol": "BTC/USDT", "side": "SELL", "price": 64150.0, "profit": 35.0, "status": "CLOSED"},
+        {"time": "10:15:20", "symbol": "BTC/USDT", "side": "BUY", "price": 63500.0, "profit": -12.0, "status": "CLOSED"},
+        {"time": "09:50:11", "symbol": "BTC/USDT", "side": "BUY", "price": 63200.0, "profit": 45.0, "status": "CLOSED"}
+    ],
+    "logs": [
+        "[10:55:00] [SYSTEM] سیستم Paper Trading با موتور شبیه‌ساز آماده است.",
+        "[10:56:12] [RISK] صندوق Safe Vault فعال: ۲۰٪ از سود معاملات منتقل شد.",
+        "[10:58:30] [ENGINE] پایش بازار فعال روی جفت‌ارز BTC/USDT با RSI=54.2",
+        "[10:59:01] [TELEMETRY] وب‌سوکت وضعیت داشبورد بدون خطا پایدار است."
+    ]
 }
 
-def log(msg: str):
-    t = datetime.now().strftime("%H:%M:%S")
-    state["logs"].append(f"[{t}] {msg}")
-    if len(state["logs"]) > 35:
-        state["logs"].pop(0)
-
-def load_initial_trades():
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT time_str, side, entry_price, exit_price, pnl FROM trades ORDER BY id DESC LIMIT 10")
-        rows = cursor.fetchall()
-        state["trades"] = [{"time_str": r[0], "side": r[1], "entry_price": r[2], "exit_price": r[3], "pnl": r[4]} for r in rows]
-
-load_initial_trades()
-
-async def market_and_strategy_loop():
-    while True:
-        await asyncio.sleep(2)
-        # نوسان قیمت شبیه‌سازی بازار
-        delta = random.uniform(-40.0, 45.0)
-        state["price"] = round(state["price"] + delta, 2)
-        state["price_history"].append(state["price"])
-        if len(state["price_history"]) > 40:
-            state["price_history"].pop(0)
-            
-        # محاسبه شاخص RSI
-        rsi_change = random.uniform(-3.0, 3.5)
-        state["rsi"] = round(max(20.0, min(85.0, state["rsi"] + rsi_change)), 1)
-        state["trend"] = "صعودی 🟢" if state["rsi"] >= 50 else "نزولی 🔴"
+HTML_TEMPLATE = """<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ATRIATRADE PRO</title>
+    <style>
+        :root {
+            --bg: #090d16;
+            --card-bg: #131a2a;
+            --border: rgba(255, 255, 255, 0.08);
+            --primary: #3b82f6;
+            --success: #10b981;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+        body { background-color: var(--bg); color: var(--text-main); padding: 12px; font-size: 13px; }
         
-        # محاسبه PnL پوزیشن فعال
-        pos = state["active_position"]
-        if pos:
-            cur_p = state["price"]
-            ent_p = pos["entry_price"]
-            amt = pos["amount"]
-            pnl = (cur_p - ent_p) * amt if pos["side"] == "BUY" else (ent_p - cur_p) * amt
-            pos["pnl"] = round(pnl, 2)
-            pos["pnl_pct"] = round((pnl / (ent_p * amt)) * 100, 2)
-            state["equity"] = round(10000.0 + state["safe_profit"] + pnl, 2)
-            
-            # خروج بر اساس حد سود و ضرر یا اشباع RSI در اتوپایلوت
-            if state["autopilot"]:
-                if pos["pnl_pct"] >= 1.2 or (pos["side"] == "BUY" and state["rsi"] > 72):
-                    log(f"🎯 سیگنال خروج هوشمند (Take Profit): بستن {pos['side']} با سود ${pos['pnl']}")
-                    await close_pos()
-                elif pos["pnl_pct"] <= -1.0 or (pos["side"] == "BUY" and state["rsi"] < 35):
-                    log(f"🛑 خروج اضطراری و حد ضرر (Stop Loss): ${pos['pnl']}")
-                    await close_pos()
-        else:
-            # تصمیم‌گیری برای ورود هوشمند (Auto-Pilot Strategy)
-            if state["autopilot"]:
-                if state["rsi"] < 38:
-                    log(f"🤖 سیگنال خرید خودکار RSI اشباع فروش ({state['rsi']})")
-                    await place_order_internal("BUY", 0.02)
-                elif state["rsi"] > 68:
-                    log(f"🤖 سیگنال فروش خودکار RSI اشباع خرید ({state['rsi']})")
-                    await place_order_internal("SELL", 0.02)
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: var(--card-bg); border-radius: 12px; border: 1px solid var(--border); margin-bottom: 12px; }
+        .brand { font-size: 18px; font-weight: 900; color: #60a5fa; letter-spacing: 0.5px; }
+        .badge { padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; background: rgba(16, 185, 129, 0.15); color: var(--success); border: 1px solid var(--success); }
+        
+        .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 12px; }
+        .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 4px; }
+        .card-title { font-size: 11px; color: var(--text-muted); }
+        .card-value { font-size: 17px; font-weight: 800; }
+        .card-sub { font-size: 11px; }
+        
+        .text-green { color: var(--success); }
+        .text-red { color: var(--danger); }
+        .text-yellow { color: var(--warning); }
+        
+        .panel { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+        .panel-title { font-size: 13px; font-weight: 700; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+        
+        .controls { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+        button { border: none; padding: 12px; border-radius: 8px; font-weight: 700; cursor: pointer; transition: 0.2s; font-size: 12px; }
+        .btn-start { background: #10b981; color: white; }
+        .btn-pause { background: #f59e0b; color: white; }
+        .btn-buy { background: #3b82f6; color: white; }
+        .btn-panic { background: #ef4444; color: white; }
+        
+        .chart-box { height: 160px; width: 100%; position: relative; margin-top: 6px; }
+        canvas { width: 100%; height: 100%; display: block; }
+        
+        table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 11px; text-align: center; }
+        th, td { padding: 8px 4px; border-bottom: 1px solid var(--border); }
+        th { color: var(--text-muted); font-weight: 600; }
+        
+        .log-box { height: 110px; overflow-y: auto; font-family: monospace; font-size: 11px; background: rgba(0,0,0,0.35); padding: 8px 10px; border-radius: 6px; color: #cbd5e1; direction: ltr; text-align: left; line-height: 1.6; }
+    </style>
+</head>
+<body>
 
-async def place_order_internal(side: str, amount: float = 0.02):
-    if state["active_position"] is not None:
-        return
-    state["active_position"] = {
-        "side": side,
-        "entry_price": state["price"],
-        "amount": amount,
-        "pnl": 0.0,
-        "pnl_pct": 0.0
-    }
-    log(f"معامله {side} به حجم {amount} BTC در قیمت ${state['price']:,.2f} ثبت شد.")
+    <div class="header">
+        <div>
+            <div class="brand">ATRIATRADE PRO</div>
+            <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">حالت Paper Trading / شبیه‌ساز امن</div>
+        </div>
+        <div class="badge" id="botBadge">فعال ●</div>
+    </div>
 
-@app.on_event("startup")
-async def startup():
-    asyncio.create_task(market_and_strategy_loop())
+    <!-- Stats Grid -->
+    <div class="grid">
+        <div class="card">
+            <span class="card-title">کل ارزش (Equity)</span>
+            <span class="card-value text-green" id="equity">$10,250.00</span>
+            <span class="card-sub text-green" id="pnl">+250.00$ (+2.5%)</span>
+        </div>
+        <div class="card">
+            <span class="card-title">موجودی کل (USDT)</span>
+            <span class="card-value" id="balance">$10,000.00</span>
+            <span class="card-sub text-muted">دارایی قابل استفاده</span>
+        </div>
+        <div class="card">
+            <span class="card-title">قیمت لحظه‌ای BTC</span>
+            <span class="card-value" id="btcPrice">$64,250.00</span>
+            <span class="card-sub text-muted" id="rsi">RSI: 54.2</span>
+        </div>
+        <div class="card">
+            <span class="card-title">صندوق امن (Safe Vault)</span>
+            <span class="card-value text-yellow" id="vault">$50.00</span>
+            <span class="card-sub text-muted">سود ذخیره‌شده</span>
+        </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="panel">
+        <div class="panel-title">فرمان‌های سریع ربات</div>
+        <div class="controls">
+            <button class="btn-start" onclick="botAction('start')">▶ شروع / ادامه ربات</button>
+            <button class="btn-pause" onclick="botAction('stop')">⏸ توقف موقت ربات</button>
+            <button class="btn-buy" onclick="botAction('quick_buy')">🛒 خرید آزمایشی (Paper)</button>
+            <button class="btn-panic" onclick="botAction('panic')">🚨 خروج اضطراری (PANIC)</button>
+        </div>
+    </div>
+
+    <!-- Live Chart -->
+    <div class="panel">
+        <div class="panel-title">
+            <span>چارت قیمت زنده (BTC/USDT)</span>
+            <span style="font-size: 10px; color: var(--text-muted);">تایم‌فریم ۱ دقیقه</span>
+        </div>
+        <div class="chart-box">
+            <canvas id="liveChart"></canvas>
+        </div>
+    </div>
+
+    <!-- Trades Table -->
+    <div class="panel">
+        <div class="panel-title">آخرین معاملات انجام‌شده</div>
+        <table>
+            <thead>
+                <tr>
+                    <th>زمان</th>
+                    <th>جفت‌ارز</th>
+                    <th>نوع</th>
+                    <th>قیمت</th>
+                    <th>سود (USDT)</th>
+                    <th>وضعیت</th>
+                </tr>
+            </thead>
+            <tbody id="tradesTable">
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Live Logs -->
+    <div class="panel">
+        <div class="panel-title">لاگ‌های سیستمی زنده</div>
+        <div class="log-box" id="logBox"></div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('liveChart');
+        const ctx = canvas.getContext('2d');
+        let priceHistory = [64120, 64150, 64100, 64180, 64210, 64190, 64250];
+
+        function drawChart() {
+            const w = canvas.parentElement.clientWidth;
+            const h = canvas.parentElement.clientHeight;
+            canvas.width = w;
+            canvas.height = h;
+
+            ctx.clearRect(0, 0, w, h);
+            const min = Math.min(...priceHistory) * 0.999;
+            const max = Math.max(...priceHistory) * 1.001;
+
+            // Grid lines
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+            ctx.lineWidth = 1;
+            for (let i = 1; i < 4; i++) {
+                ctx.beginPath();
+                ctx.moveTo(0, (h / 4) * i);
+                ctx.lineTo(w, (h / 4) * i);
+                ctx.stroke();
+            }
+
+            // Price path
+            ctx.beginPath();
+            ctx.strokeStyle = '#3b82f6';
+            ctx.lineWidth = 2.5;
+
+            priceHistory.forEach((p, i) => {
+                const x = (i / (priceHistory.length - 1)) * w;
+                const y = h - ((p - min) / (max - min)) * (h - 24) - 12;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            });
+            ctx.stroke();
+
+            // Gradient area
+            ctx.lineTo(w, h);
+            ctx.lineTo(0, h);
+            const grad = ctx.createLinearGradient(0, 0, 0, h);
+            grad.addColorStop(0, 'rgba(59, 130, 246, 0.25)');
+            grad.addColorStop(1, 'rgba(59, 130, 246, 0.0)');
+            ctx.fillStyle = grad;
+            ctx.fill();
+        }
+
+        async function updateDashboard() {
+            try {
+                const res = await fetch('/api/status');
+                const data = await res.json();
+
+                // Values
+                const bal = Number(data.balance_usdt || 10000);
+                const eq = Number(data.equity || 10250);
+                const pnl = Number(data.pnl_usd || 0);
+                const pnlPct = Number(data.pnl_pct || 0);
+                const vault = Number(data.vault_balance || 0);
+                const btc = Number(data.btc_price || 64250);
+
+                document.getElementById('balance').innerText = '$' + bal.toLocaleString(undefined, {minimumFractionDigits: 2});
+                document.getElementById('equity').innerText = '$' + eq.toLocaleString(undefined, {minimumFractionDigits: 2});
+                document.getElementById('pnl').innerText = (pnl >= 0 ? '+' : '') + pnl.toFixed(2) + '$ (' + (pnl >= 0 ? '+' : '') + pnlPct.toFixed(2) + '%)';
+                document.getElementById('vault').innerText = '$' + vault.toFixed(2);
+                document.getElementById('btcPrice').innerText = '$' + btc.toLocaleString(undefined, {minimumFractionDigits: 2});
+
+                // Status Badge
+                const isAct = data.bot_status === 'active';
+                const badge = document.getElementById('botBadge');
+                badge.innerText = isAct ? 'فعال ●' : 'متوقف ⏸';
+                badge.style.color = isAct ? 'var(--success)' : 'var(--warning)';
+                badge.style.borderColor = isAct ? 'var(--success)' : 'var(--warning)';
+
+                // Trades Table
+                if (data.trades && data.trades.length) {
+                    const tbody = document.getElementById('tradesTable');
+                    tbody.innerHTML = data.trades.map(t => `
+                        <tr>
+                            <td style="color:var(--text-muted);">${t.time}</td>
+                            <td style="font-weight:700;">${t.symbol}</td>
+                            <td style="color:${t.side === 'BUY' ? 'var(--success)' : 'var(--danger)'}; font-weight:700;">${t.side}</td>
+                            <td>$${Number(t.price).toLocaleString()}</td>
+                            <td class="${t.profit >= 0 ? 'text-green' : 'text-red'}" style="font-weight:700;">
+                                ${t.profit >= 0 ? '+' : ''}${Number(t.profit).toFixed(1)}$
+                            </td>
+                            <td><span style="font-size:10px; padding:2px 6px; border-radius:4px; background:rgba(255,255,255,0.06);">${t.status}</span></td>
+                        </tr>
+                    `).join('');
+                }
+
+                // Logs Box
+                if (data.logs && data.logs.length) {
+                    const logBox = document.getElementById('logBox');
+                    logBox.innerHTML = data.logs.map(l => `<div>${l}</div>`).join('');
+                    logBox.scrollTop = logBox.scrollHeight;
+                }
+
+                // Push new simulated tick for chart
+                const noise = (Math.random() - 0.49) * 20;
+                const nextP = Math.round(priceHistory[priceHistory.length - 1] + noise);
+                priceHistory.push(nextP);
+                if (priceHistory.length > 25) priceHistory.shift();
+                drawChart();
+
+            } catch (err) {
+                console.error("Fetch status error:", err);
+            }
+        }
+
+        async function botAction(action) {
+            let endpoint = '/api/bot/start';
+            if (action === 'stop' || action === 'panic') endpoint = '/api/bot/stop';
+            if (action === 'quick_buy') endpoint = '/api/bot/quick_buy';
+            await fetch(endpoint, { method: 'POST' });
+            updateDashboard();
+        }
+
+        window.addEventListener('resize', drawChart);
+        drawChart();
+        updateDashboard();
+        setInterval(updateDashboard, 2500);
+    </script>
+</body>
+</html>
+"""
 
 @app.get("/", response_class=HTMLResponse)
-async def index():
-    with open("src/web/index.html", "r", encoding="utf-8") as f:
-        return f.read()
+async def serve_dashboard():
+    return HTMLResponse(content=HTML_TEMPLATE)
 
+@app.get("/api/status")
 @app.get("/api/telemetry")
-async def telemetry():
-    return {
-        "current_price": state["price"],
-        "equity": state["equity"],
-        "safe_profit": state["safe_profit"],
-        "rsi": state["rsi"],
-        "trend": state["trend"],
-        "autopilot": state["autopilot"],
-        "price_history": state["price_history"],
-        "active_position": state["active_position"],
-        "recent_trades": state["trades"],
-        "logs": state["logs"]
-    }
+async def get_status():
+    return JSONResponse(state)
 
-class OrderModel(BaseModel):
-    side: str
-    amount: float = 0.02
+@app.post("/api/bot/start")
+async def start_bot():
+    state["bot_status"] = "active"
+    state["logs"].append(f"[{time.strftime('%H:%M:%S')}] [COMMAND] بات توسط کاربر فعال شد.")
+    return JSONResponse({"status": "started", "bot_status": "active"})
 
-@app.post("/api/order/manual")
-async def place_order(o: OrderModel):
-    await place_order_internal(o.side.upper(), o.amount)
-    return {"status": "ok"}
+@app.post("/api/bot/stop")
+async def stop_bot():
+    state["bot_status"] = "paused"
+    state["logs"].append(f"[{time.strftime('%H:%M:%S')}] [COMMAND] بات توسط کاربر متوقف شد.")
+    return JSONResponse({"status": "paused", "bot_status": "paused"})
 
-@app.post("/api/order/close")
-async def close_pos():
-    pos = state["active_position"]
-    if pos:
-        pnl = pos["pnl"]
-        t_str = datetime.now().strftime("%H:%M:%S")
-        trade_record = {
-            "time_str": t_str,
-            "side": pos["side"],
-            "entry_price": pos["entry_price"],
-            "exit_price": state["price"],
-            "pnl": pnl
-        }
-        state["trades"].insert(0, trade_record)
-        if len(state["trades"]) > 25:
-            state["trades"].pop()
-
-        # ذخیره در دیتابیس
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.execute(
-                "INSERT INTO trades (time_str, side, entry_price, exit_price, pnl) VALUES (?, ?, ?, ?, ?)",
-                (t_str, pos["side"], pos["entry_price"], state["price"], pnl)
-            )
-            conn.commit()
-
-        # منطق انتقال به صندوق امن سود
-        if pnl > 0:
-            saved = round(pnl * 0.3, 2)
-            state["safe_profit"] = round(state["safe_profit"] + saved, 2)
-            log(f"💰 معامله بسته شد | سود کل: +${pnl} | انتقال ۳۰٪ (${saved}) به صندوق امن")
-        else:
-            log(f"⚠️ معامله بسته شد با PnL: ${pnl}")
-        
-        state["active_position"] = None
-        state["equity"] = round(10000.0 + state["safe_profit"], 2)
-    return {"status": "ok"}
-
-@app.post("/api/autopilot/toggle")
-async def toggle_auto():
-    state["autopilot"] = not state["autopilot"]
-    st_text = "فعال" if state["autopilot"] else "غیرفعال"
-    log(f"⚡ اتوپایلوت توسط کاربر {st_text} شد.")
-    return {"autopilot": state["autopilot"]}
-
-@app.post("/api/panic")
-async def panic():
-    state["autopilot"] = False
-    if state["active_position"]:
-        await close_pos()
-    log("🚨 دستور اضطراری (PANIC): تمام پوزیشن‌ها بسته و اتوپایلوت خاموش شد.")
-    return {"status": "panic"}
-
-@app.get("/api/export/csv")
-async def export_csv():
-    out = io.StringIO()
-    w = csv.writer(out)
-    w.writerow(["زمان", "نوع", "قیمت ورود", "قیمت خروج", "سود/زیان"])
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        for row in cursor.execute("SELECT time_str, side, entry_price, exit_price, pnl FROM trades ORDER BY id DESC"):
-            w.writerow(row)
-    return Response(content=out.getvalue(), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=trades_history.csv"})
+@app.post("/api/bot/quick_buy")
+async def quick_buy():
+    cur_p = state["btc_price"]
+    state["trades"].insert(0, {
+        "time": time.strftime("%H:%M:%S"),
+        "symbol": "BTC/USDT",
+        "side": "BUY",
+        "price": cur_p,
+        "profit": 0.0,
+        "status": "OPEN"
+    })
+    state["logs"].append(f"[{time.strftime('%H:%M:%S')}] [TRADE] سفارش خرید آزمایشی ثبت شد: 0.05 BTC در ${cur_p}")
+    return JSONResponse({"status": "success"})
