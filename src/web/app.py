@@ -1,328 +1,285 @@
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, JSONResponse
+# -*- coding: utf-8 -*-
+"""
+AtriaTrade Web App v1.4
+- Login-first secure dashboard (HMAC session cookie)
+- Telemetry + Bot control endpoints
+- 100% Paper-Trading safe
+"""
+from __future__ import annotations
+
+import hmac
+import hashlib
+import os
+import secrets
 import time
+from typing import Any, Dict
 
-app = FastAPI(title="AtriaTrade Pro Dashboard")
+import uvicorn
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.security import APIKeyHeader
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel
 
-# وضعیت شبیه‌ساز امن Paper Trading
-state = {
-    "bot_status": "active",
-    "mode": "paper_trading",
-    "balance_usdt": 10000.0,
-    "equity": 10250.0,
-    "pnl_usd": 250.0,
-    "pnl_pct": 2.5,
-    "vault_balance": 50.0,
-    "btc_price": 64250.0,
-    "rsi": 54.2,
-    "trades": [
-        {"time": "10:45:12", "symbol": "BTC/USDT", "side": "BUY", "price": 63800.0, "profit": 22.5, "status": "CLOSED"},
-        {"time": "10:30:45", "symbol": "BTC/USDT", "side": "SELL", "price": 64150.0, "profit": 35.0, "status": "CLOSED"},
-        {"time": "10:15:20", "symbol": "BTC/USDT", "side": "BUY", "price": 63500.0, "profit": -12.0, "status": "CLOSED"},
-        {"time": "09:50:11", "symbol": "BTC/USDT", "side": "BUY", "price": 63200.0, "profit": 45.0, "status": "CLOSED"}
-    ],
-    "logs": [
-        "[10:55:00] [SYSTEM] سیستم Paper Trading با موتور شبیه‌ساز آماده است.",
-        "[10:56:12] [RISK] صندوق Safe Vault فعال: ۲۰٪ از سود معاملات منتقل شد.",
-        "[10:58:30] [ENGINE] پایش بازار فعال روی جفت‌ارز BTC/USDT با RSI=54.2",
-        "[10:59:01] [TELEMETRY] وب‌سوکت وضعیت داشبورد بدون خطا پایدار است."
-    ]
+try:
+    from src.dashboard.server import DashboardServer
+    from src.dashboard.auth import SecureAuthManager
+except ImportError as e:
+    print(f"❌ ImportError: Could not import dashboard components: {e}")
+    raise
+
+# ---------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------
+ADMIN_PIN = "402139235"
+SERVER_SECRET = os.environ.get("ATRIA_SECRET") or secrets.token_hex(32)
+SESSION_COOKIE = "atria_session"
+SESSION_TTL = 12 * 3600  # 12 hours
+
+LOGIN_RATE: Dict[str, list] = {}
+MAX_LOGIN_ATTEMPTS, LOGIN_WINDOW = 5, 60
+
+WEB_DIR = os.path.dirname(os.path.abspath(__file__))
+templates = Jinja2Templates(directory=os.path.join(WEB_DIR, "templates"))
+STATIC_DIR = os.path.join(WEB_DIR, "static")
+
+auth_manager = SecureAuthManager()
+dashboard_server = DashboardServer(auth_manager=auth_manager)
+
+BOT_STATE = {
+    "status": "RUNNING", "mode": "PAPER_TRADING", "autopilot": True,
+    "btc_price": 95240.50, "total_equity": 10250.00, "reserve_usdt": 250.00,
+    "win_rate": 78.5, "total_profit_usdt": 250.00, "rsi": 54.2, "trend": "BULLISH 📈",
+    "position": {"side": "FLAT", "amount": 0, "entry_price": 0, "pnl": 0, "pnl_pct": 0, "tp": 0, "sl": 0},
+    "recent_trades": [], "logs": ["[BOOT] AtriaTrade v1.4 online — Secure Mode ✅"],
 }
 
-HTML_TEMPLATE = """<!DOCTYPE html>
-<html lang="fa" dir="rtl">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ATRIATRADE PRO</title>
-    <style>
-        :root {
-            --bg: #090d16;
-            --card-bg: #131a2a;
-            --border: rgba(255, 255, 255, 0.08);
-            --primary: #3b82f6;
-            --success: #10b981;
-            --danger: #ef4444;
-            --warning: #f59e0b;
-            --text-main: #f8fafc;
-            --text-muted: #94a3b8;
-        }
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
-        body { background-color: var(--bg); color: var(--text-main); padding: 12px; font-size: 13px; }
-        
-        .header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: var(--card-bg); border-radius: 12px; border: 1px solid var(--border); margin-bottom: 12px; }
-        .brand { font-size: 18px; font-weight: 900; color: #60a5fa; letter-spacing: 0.5px; }
-        .badge { padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; background: rgba(16, 185, 129, 0.15); color: var(--success); border: 1px solid var(--success); }
-        
-        .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 12px; }
-        .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 4px; }
-        .card-title { font-size: 11px; color: var(--text-muted); }
-        .card-value { font-size: 17px; font-weight: 800; }
-        .card-sub { font-size: 11px; }
-        
-        .text-green { color: var(--success); }
-        .text-red { color: var(--danger); }
-        .text-yellow { color: var(--warning); }
-        
-        .panel { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 14px; margin-bottom: 12px; }
-        .panel-title { font-size: 13px; font-weight: 700; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
-        
-        .controls { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
-        button { border: none; padding: 12px; border-radius: 8px; font-weight: 700; cursor: pointer; transition: 0.2s; font-size: 12px; }
-        .btn-start { background: #10b981; color: white; }
-        .btn-pause { background: #f59e0b; color: white; }
-        .btn-buy { background: #3b82f6; color: white; }
-        .btn-panic { background: #ef4444; color: white; }
-        
-        .chart-box { height: 160px; width: 100%; position: relative; margin-top: 6px; }
-        canvas { width: 100%; height: 100%; display: block; }
-        
-        table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 11px; text-align: center; }
-        th, td { padding: 8px 4px; border-bottom: 1px solid var(--border); }
-        th { color: var(--text-muted); font-weight: 600; }
-        
-        .log-box { height: 110px; overflow-y: auto; font-family: monospace; font-size: 11px; background: rgba(0,0,0,0.35); padding: 8px 10px; border-radius: 6px; color: #cbd5e1; direction: ltr; text-align: left; line-height: 1.6; }
-    </style>
-</head>
-<body>
+# ---------------------------------------------------------------------
+# App
+# ---------------------------------------------------------------------
+app = FastAPI(title="AtriaTrade Dashboard API", version="1.4.0")
+if os.path.isdir(STATIC_DIR):
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-    <div class="header">
-        <div>
-            <div class="brand">ATRIATRADE PRO</div>
-            <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">حالت Paper Trading / شبیه‌ساز امن</div>
-        </div>
-        <div class="badge" id="botBadge">فعال ●</div>
-    </div>
 
-    <!-- Stats Grid -->
-    <div class="grid">
-        <div class="card">
-            <span class="card-title">کل ارزش (Equity)</span>
-            <span class="card-value text-green" id="equity">$10,250.00</span>
-            <span class="card-sub text-green" id="pnl">+250.00$ (+2.5%)</span>
-        </div>
-        <div class="card">
-            <span class="card-title">موجودی کل (USDT)</span>
-            <span class="card-value" id="balance">$10,000.00</span>
-            <span class="card-sub text-muted">دارایی قابل استفاده</span>
-        </div>
-        <div class="card">
-            <span class="card-title">قیمت لحظه‌ای BTC</span>
-            <span class="card-value" id="btcPrice">$64,250.00</span>
-            <span class="card-sub text-muted" id="rsi">RSI: 54.2</span>
-        </div>
-        <div class="card">
-            <span class="card-title">صندوق امن (Safe Vault)</span>
-            <span class="card-value text-yellow" id="vault">$50.00</span>
-            <span class="card-sub text-muted">سود ذخیره‌شده</span>
-        </div>
-    </div>
+def add_log(msg: str):
+    BOT_STATE["logs"].append(f"[{time.strftime('%H:%M:%S')}] {msg}")
+    if len(BOT_STATE["logs"]) > 80:
+        BOT_STATE["logs"].pop(0)
 
-    <!-- Controls -->
-    <div class="panel">
-        <div class="panel-title">فرمان‌های سریع ربات</div>
-        <div class="controls">
-            <button class="btn-start" onclick="botAction('start')">▶ شروع / ادامه ربات</button>
-            <button class="btn-pause" onclick="botAction('stop')">⏸ توقف موقت ربات</button>
-            <button class="btn-buy" onclick="botAction('quick_buy')">🛒 خرید آزمایشی (Paper)</button>
-            <button class="btn-panic" onclick="botAction('panic')">🚨 خروج اضطراری (PANIC)</button>
-        </div>
-    </div>
 
-    <!-- Live Chart -->
-    <div class="panel">
-        <div class="panel-title">
-            <span>چارت قیمت زنده (BTC/USDT)</span>
-            <span style="font-size: 10px; color: var(--text-muted);">تایم‌فریم ۱ دقیقه</span>
-        </div>
-        <div class="chart-box">
-            <canvas id="liveChart"></canvas>
-        </div>
-    </div>
+# ---------------------------------------------------------------------
+# Session helpers
+# ---------------------------------------------------------------------
+def _sign(payload: str) -> str:
+    return hmac.new(SERVER_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
 
-    <!-- Trades Table -->
-    <div class="panel">
-        <div class="panel-title">آخرین معاملات انجام‌شده</div>
-        <table>
-            <thead>
-                <tr>
-                    <th>زمان</th>
-                    <th>جفت‌ارز</th>
-                    <th>نوع</th>
-                    <th>قیمت</th>
-                    <th>سود (USDT)</th>
-                    <th>وضعیت</th>
-                </tr>
-            </thead>
-            <tbody id="tradesTable">
-            </tbody>
-        </table>
-    </div>
 
-    <!-- Live Logs -->
-    <div class="panel">
-        <div class="panel-title">لاگ‌های سیستمی زنده</div>
-        <div class="log-box" id="logBox"></div>
-    </div>
+def make_session_token() -> str:
+    exp = str(int(time.time()) + SESSION_TTL)
+    return f"{exp}.{_sign(exp)}"
 
-    <script>
-        const canvas = document.getElementById('liveChart');
-        const ctx = canvas.getContext('2d');
-        let priceHistory = [64120, 64150, 64100, 64180, 64210, 64190, 64250];
 
-        function drawChart() {
-            const w = canvas.parentElement.clientWidth;
-            const h = canvas.parentElement.clientHeight;
-            canvas.width = w;
-            canvas.height = h;
+def is_valid_session(token: str | None) -> bool:
+    if not token or "." not in token:
+        return False
+    exp, sig = token.split(".", 1)
+    if not hmac.compare_digest(sig, _sign(exp)):
+        return False
+    try:
+        return int(exp) > time.time()
+    except ValueError:
+        return False
 
-            ctx.clearRect(0, 0, w, h);
-            const min = Math.min(...priceHistory) * 0.999;
-            const max = Math.max(...priceHistory) * 1.001;
 
-            // Grid lines
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
-            ctx.lineWidth = 1;
-            for (let i = 1; i < 4; i++) {
-                ctx.beginPath();
-                ctx.moveTo(0, (h / 4) * i);
-                ctx.lineTo(w, (h / 4) * i);
-                ctx.stroke();
-            }
+async def auth_gate(request: Request, call_next):
+    """Login-first middleware for every route except auth endpoints."""
+    path = request.url.path
+    public = path in ("/login", "/api/auth/login") or path.startswith("/static")
+    if not public and not is_valid_session(request.cookies.get(SESSION_COOKIE)):
+        if path.startswith("/api/"):
+            return JSONResponse(status_code=401, content={"success": False, "error": "Not authenticated"})
+        return RedirectResponse("/login", status_code=302)
+    return await call_next(request)
 
-            // Price path
-            ctx.beginPath();
-            ctx.strokeStyle = '#3b82f6';
-            ctx.lineWidth = 2.5;
+app.middleware("http")(auth_gate)
 
-            priceHistory.forEach((p, i) => {
-                const x = (i / (priceHistory.length - 1)) * w;
-                const y = h - ((p - min) / (max - min)) * (h - 24) - 12;
-                if (i === 0) ctx.moveTo(x, y);
-                else ctx.lineTo(x, y);
-            });
-            ctx.stroke();
 
-            // Gradient area
-            ctx.lineTo(w, h);
-            ctx.lineTo(0, h);
-            const grad = ctx.createLinearGradient(0, 0, 0, h);
-            grad.addColorStop(0, 'rgba(59, 130, 246, 0.25)');
-            grad.addColorStop(1, 'rgba(59, 130, 246, 0.0)');
-            ctx.fillStyle = grad;
-            ctx.fill();
-        }
+# ---------------------------------------------------------------------
+# Login UI (self-contained, cyberpunk)
+# ---------------------------------------------------------------------
+LOGIN_HTML = """<!DOCTYPE html>
+<html lang="fa" dir="rtl"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ورود | AtriaTrade</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>body{background:#05070d;font-family:Vazirmatn,Tahoma,sans-serif}
+.grid-bg{background-image:linear-gradient(rgba(0,255,170,.06) 1px,transparent 1px),linear-gradient(90deg,rgba(0,255,170,.06) 1px,transparent 1px);background-size:32px 32px}
+.glow{box-shadow:0 0 24px rgba(0,255,170,.25)}</style></head>
+<body class="grid-bg min-h-screen flex items-center justify-center">
+<div class="bg-[#0b101c] border border-emerald-500/30 rounded-2xl p-8 w-80 glow text-center">
+  <div class="text-5xl mb-3">🛡️</div>
+  <h1 class="text-emerald-400 font-bold text-xl mb-1 tracking-wider">ATRIATRADE</h1>
+  <p class="text-gray-500 text-sm mb-6">ورود امن به مرکز کنترل</p>
+  <input id="pin" type="password" inputmode="numeric" maxlength="12" placeholder="PIN ورود"
+    class="w-full bg-black/40 border border-emerald-500/30 rounded-lg px-4 py-3 text-center text-emerald-300 tracking-widest text-lg outline-none focus:border-emerald-400 mb-3">
+  <button onclick="doLogin()" class="w-full bg-emerald-500 hover:bg-emerald-400 text-black font-bold py-3 rounded-lg transition">🔓 ورود</button>
+  <p id="err" class="text-red-400 text-sm mt-3 h-5"></p>
+</div>
+<script>
+async function doLogin(){
+  const r = await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pin:document.getElementById('pin').value})});
+  if(r.ok){location.href='/';}else{document.getElementById('err').textContent=(await r.json()).error||'PIN نامعتبر';}
+}
+document.getElementById('pin').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
+</script></body></html>"""
 
-        async function updateDashboard() {
-            try {
-                const res = await fetch('/api/status');
-                const data = await res.json();
 
-                // Values
-                const bal = Number(data.balance_usdt || 10000);
-                const eq = Number(data.equity || 10250);
-                const pnl = Number(data.pnl_usd || 0);
-                const pnlPct = Number(data.pnl_pct || 0);
-                const vault = Number(data.vault_balance || 0);
-                const btc = Number(data.btc_price || 64250);
+@app.get("/login", response_class=HTMLResponse)
+async def login_page():
+    return HTMLResponse(LOGIN_HTML)
 
-                document.getElementById('balance').innerText = '$' + bal.toLocaleString(undefined, {minimumFractionDigits: 2});
-                document.getElementById('equity').innerText = '$' + eq.toLocaleString(undefined, {minimumFractionDigits: 2});
-                document.getElementById('pnl').innerText = (pnl >= 0 ? '+' : '') + pnl.toFixed(2) + '$ (' + (pnl >= 0 ? '+' : '') + pnlPct.toFixed(2) + '%)';
-                document.getElementById('vault').innerText = '$' + vault.toFixed(2);
-                document.getElementById('btcPrice').innerText = '$' + btc.toLocaleString(undefined, {minimumFractionDigits: 2});
 
-                // Status Badge
-                const isAct = data.bot_status === 'active';
-                const badge = document.getElementById('botBadge');
-                badge.innerText = isAct ? 'فعال ●' : 'متوقف ⏸';
-                badge.style.color = isAct ? 'var(--success)' : 'var(--warning)';
-                badge.style.borderColor = isAct ? 'var(--success)' : 'var(--warning)';
+@app.post("/api/auth/login")
+async def login(request: Request, payload: Dict[str, Any] = None):
+    body = await request.json()
+    ip = request.client.host if request.client else "?"
+    now = time.time()
+    attempts = [t for t in LOGIN_RATE.get(ip, []) if now - t < LOGIN_WINDOW]
+    if len(attempts) >= MAX_LOGIN_ATTEMPTS:
+        raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")
+    if body.get("pin") != ADMIN_PIN:
+        attempts.append(now)
+        LOGIN_RATE[ip] = attempts
+        raise HTTPException(status_code=401, detail="PIN نامعتبر است.")
+    LOGIN_RATE.pop(ip, None)
+    add_log("🔓 Admin login successful.")
+    resp = JSONResponse(content={"success": True})
+    resp.set_cookie(SESSION_COOKIE, make_session_token(), httponly=True, samesite="lax", max_age=SESSION_TTL)
+    return resp
 
-                // Trades Table
-                if (data.trades && data.trades.length) {
-                    const tbody = document.getElementById('tradesTable');
-                    tbody.innerHTML = data.trades.map(t => `
-                        <tr>
-                            <td style="color:var(--text-muted);">${t.time}</td>
-                            <td style="font-weight:700;">${t.symbol}</td>
-                            <td style="color:${t.side === 'BUY' ? 'var(--success)' : 'var(--danger)'}; font-weight:700;">${t.side}</td>
-                            <td>$${Number(t.price).toLocaleString()}</td>
-                            <td class="${t.profit >= 0 ? 'text-green' : 'text-red'}" style="font-weight:700;">
-                                ${t.profit >= 0 ? '+' : ''}${Number(t.profit).toFixed(1)}$
-                            </td>
-                            <td><span style="font-size:10px; padding:2px 6px; border-radius:4px; background:rgba(255,255,255,0.06);">${t.status}</span></td>
-                        </tr>
-                    `).join('');
-                }
 
-                // Logs Box
-                if (data.logs && data.logs.length) {
-                    const logBox = document.getElementById('logBox');
-                    logBox.innerHTML = data.logs.map(l => `<div>${l}</div>`).join('');
-                    logBox.scrollTop = logBox.scrollHeight;
-                }
+@app.post("/api/auth/logout")
+async def logout():
+    add_log("🔒 Admin logged out.")
+    resp = JSONResponse(content={"success": True})
+    resp.delete_cookie(SESSION_COOKIE)
+    return resp
 
-                // Push new simulated tick for chart
-                const noise = (Math.random() - 0.49) * 20;
-                const nextP = Math.round(priceHistory[priceHistory.length - 1] + noise);
-                priceHistory.push(nextP);
-                if (priceHistory.length > 25) priceHistory.shift();
-                drawChart();
 
-            } catch (err) {
-                console.error("Fetch status error:", err);
-            }
-        }
-
-        async function botAction(action) {
-            let endpoint = '/api/bot/start';
-            if (action === 'stop' || action === 'panic') endpoint = '/api/bot/stop';
-            if (action === 'quick_buy') endpoint = '/api/bot/quick_buy';
-            await fetch(endpoint, { method: 'POST' });
-            updateDashboard();
-        }
-
-        window.addEventListener('resize', drawChart);
-        drawChart();
-        updateDashboard();
-        setInterval(updateDashboard, 2500);
-    </script>
-</body>
-</html>
-"""
-
+# ---------------------------------------------------------------------
+# UI
+# ---------------------------------------------------------------------
 @app.get("/", response_class=HTMLResponse)
-async def serve_dashboard():
-    return HTMLResponse(content=HTML_TEMPLATE)
+async def root(request: Request):
+    return templates.TemplateResponse("dashboard.html", {"request": request, "page_title": "AtriaTrade Dashboard Pro"})
 
-@app.get("/api/status")
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard_page(request: Request):
+    return templates.TemplateResponse("dashboard.html", {"request": request, "page_title": "AtriaTrade Dashboard Pro"})
+
+
+# ---------------------------------------------------------------------
+# Telemetry
+# ---------------------------------------------------------------------
 @app.get("/api/telemetry")
-async def get_status():
-    return JSONResponse(state)
-
-@app.post("/api/bot/start")
-async def start_bot():
-    state["bot_status"] = "active"
-    state["logs"].append(f"[{time.strftime('%H:%M:%S')}] [COMMAND] بات توسط کاربر فعال شد.")
-    return JSONResponse({"status": "started", "bot_status": "active"})
-
-@app.post("/api/bot/stop")
-async def stop_bot():
-    state["bot_status"] = "paused"
-    state["logs"].append(f"[{time.strftime('%H:%M:%S')}] [COMMAND] بات توسط کاربر متوقف شد.")
-    return JSONResponse({"status": "paused", "bot_status": "paused"})
-
-@app.post("/api/bot/quick_buy")
-async def quick_buy():
-    cur_p = state["btc_price"]
-    state["trades"].insert(0, {
-        "time": time.strftime("%H:%M:%S"),
-        "symbol": "BTC/USDT",
-        "side": "BUY",
-        "price": cur_p,
-        "profit": 0.0,
-        "status": "OPEN"
+async def telemetry():
+    import random
+    BOT_STATE["btc_price"] = round(BOT_STATE["btc_price"] + random.uniform(-15, 15), 2)
+    pos = BOT_STATE["position"]
+    if pos.get("side") != "FLAT":
+        sign = 1 if pos["side"] == "LONG" else -1
+        pnl = round((BOT_STATE["btc_price"] - pos["entry_price"]) * pos["amount"] * sign, 2)
+        pos["pnl"] = pnl
+        pos["pnl_pct"] = round(pnl / (pos["entry_price"] * pos["amount"]) * 100, 2)
+    return JSONResponse(content={
+        "status": BOT_STATE["status"], "mode": BOT_STATE["mode"], "autopilot": BOT_STATE["autopilot"],
+        "btc_price": BOT_STATE["btc_price"], "current_price": BOT_STATE["btc_price"],
+        "price_str": f"{BOT_STATE['btc_price']:,.2f}",
+        "total_equity": round(BOT_STATE["total_equity"] + pos.get("pnl", 0), 2), "equity": BOT_STATE["total_equity"],
+        "reserve_usdt": BOT_STATE["reserve_usdt"], "safe_profit": BOT_STATE["reserve_usdt"],
+        "win_rate": BOT_STATE["win_rate"], "total_profit_usdt": BOT_STATE["total_profit_usdt"],
+        "rsi": BOT_STATE["rsi"], "trend": BOT_STATE["trend"],
+        "position": pos, "active_position": pos,
+        "recent_trades": BOT_STATE["recent_trades"], "logs": BOT_STATE["logs"],
+        "timestamp": time.time(),
     })
-    state["logs"].append(f"[{time.strftime('%H:%M:%S')}] [TRADE] سفارش خرید آزمایشی ثبت شد: 0.05 BTC در ${cur_p}")
-    return JSONResponse({"status": "success"})
+
+
+# ---------------------------------------------------------------------
+# Bot actions
+# ---------------------------------------------------------------------
+def open_position(side: str, amount: float):
+    p = BOT_STATE["btc_price"]
+    BOT_STATE["position"] = {
+        "side": side, "amount": amount, "entry_price": p, "pnl": 0.0, "pnl_pct": 0.0,
+        "tp": round(p * (1.02 if side == "LONG" else 0.98), 2),
+        "sl": round(p * (0.98 if side == "LONG" else 1.02), 2),
+    }
+    add_log(f"{'🟢' if side == 'LONG' else '🔴'} Manual {side}: {amount} BTC @ ${p:,.2f}")
+
+
+@app.post("/api/action")
+async def action(payload: Dict[str, Any] = None):
+    raw = dict(payload or {})
+    act = str(raw.get("action", "")).upper()
+    amount = float(raw.get("amount", 0.02))
+
+    if act in ("BUY", "LONG"):
+        open_position("LONG", amount)
+        return {"success": True, "message": f"LONG {amount} BTC (Paper)"}
+    if act in ("SELL", "SHORT"):
+        open_position("SHORT", amount)
+        return {"success": True, "message": f"SHORT {amount} BTC (Paper)"}
+    if act in ("CLOSE", "CLOSE_POSITION"):
+        pos = BOT_STATE["position"]
+        if pos.get("side") == "FLAT":
+            return {"success": False, "message": "No active position"}
+        pnl = pos.get("pnl", 0.0)
+        BOT_STATE["total_equity"] += pnl
+        BOT_STATE["total_profit_usdt"] += pnl
+        BOT_STATE["recent_trades"].insert(0, {"time": time.strftime("%H:%M:%S"), "time_str": time.strftime("%H:%M:%S"),
+                                              "action": "CLOSE", "side": pos["side"], "amount": pos["amount"],
+                                              "entry_price": pos["entry_price"], "exit_price": BOT_STATE["btc_price"], "pnl": pnl})
+        BOT_STATE["recent_trades"] = BOT_STATE["recent_trades"][:10]
+        add_log(f"⚪ Closed {pos['side']} | Realized PnL: ${pnl:+.2f}")
+        BOT_STATE["position"] = {"side": "FLAT", "amount": 0, "entry_price": 0, "pnl": 0, "pnl_pct": 0, "tp": 0, "sl": 0}
+        return {"success": True, "message": f"Closed with PnL ${pnl:+.2f}"}
+    if act in ("START", "RESUME"):
+        BOT_STATE["status"] = "RUNNING"; add_log("▶ Engine resumed.")
+        return {"success": True, "status": "RUNNING"}
+    if act in ("STOP", "PAUSE"):
+        BOT_STATE["status"] = "PAUSED"; add_log("⏸ Engine paused.")
+        return {"success": True, "status": "PAUSED"}
+    if act == "TOGGLE_AUTOPILOT":
+        BOT_STATE["autopilot"] = not BOT_STATE["autopilot"]
+        add_log(f"🤖 Auto-Pilot {'ENABLED' if BOT_STATE['autopilot'] else 'DISABLED'}.")
+        return {"success": True, "autopilot": BOT_STATE["autopilot"]}
+    return {"success": False, "message": f"Unknown action: {act}"}
+
+
+@app.post("/api/order/close")
+async def close_order():
+    return await action({"action": "CLOSE"})
+
+
+@app.post("/api/panic")
+async def panic():
+    add_log("🚨 PANIC! Closing all positions & stopping engine.")
+    await action({"action": "CLOSE"})
+    BOT_STATE["status"] = "STOPPED"
+    BOT_STATE["autopilot"] = False
+    return {"success": True, "message": "Panic executed."}
+
+
+# ---------------------------------------------------------------------
+# Run
+# ---------------------------------------------------------------------
+if __name__ == "__main__":
+    print("\n" + "=" * 60)
+    print("🚀 AtriaTrade v1.4 — Secure Dashboard (Login Required)")
+    print("   http://127.0.0.1:8080")
+    print("=" * 60 + "\n")
+    uvicorn.run("src.web.app:app", host="0.0.0.0", port=8080, reload=False)
