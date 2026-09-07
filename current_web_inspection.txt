@@ -1,0 +1,295 @@
+
+===== CURRENT APP.PY =====
+     1	# -*- coding: utf-8 -*-
+     2	"""
+     3	FastAPI application for AtriaTrade Dashboard.
+     4	Integrates DashboardServer for bot telemetry and control.
+     5	This file serves as the main entry point for the web API.
+     6	"""
+     7	from fastapi import FastAPI, HTTPException, Request, Depends
+     8	from fastapi.security import APIKeyHeader
+     9	from pydantic import BaseModel, Field
+    10	from typing import Dict, Any, Optional
+    11	import uvicorn
+    12	import os
+    13	import time # Added for timestamp in public status
+    14	
+    15	# --- Project Imports ---
+    16	# Assuming the structure:
+    17	# AtriaTrade/
+    18	# ├── src/
+    19	# │   ├── dashboard/
+    20	# │   │   ├── server.py
+    21	# │   │   └── auth.py
+    22	# │   └── ... (other modules like core, strategy, etc.)
+    23	# └── venv/
+    24	
+    25	# Attempt to import necessary components, providing guidance if they are missing.
+    26	try:
+    27	    from src.dashboard.server import DashboardServer
+    28	    from src.dashboard.auth import SecureAuthManager
+    29	except ImportError as e:
+    30	    print(f"❌ ImportError: Could not import dashboard components. {e}")
+    31	    print("   Please ensure:")
+    32	    print("   1. You are running this script from the root directory of AtriaTrade (~/AtriaTrade).")
+    33	    print("   2. The directory structure includes src/dashboard/server.py and src/dashboard/auth.py.")
+    34	    exit(1) # Exit if essential components are not found
+    35	
+    36	
+    37	# --- Configuration ---
+    38	# Define the name of the header used for authentication tokens.
+    39	AUTH_TOKEN_HEADER_NAME = "X-Auth-Token"
+    40	
+    41	# Placeholder for an administrator token.
+    42	# IMPORTANT: Replace 'SET_YOUR_ADMIN_TOKEN_HERE' with a securely generated token.
+    43	# You can generate one using the Python console:
+    44	# >>> from src.dashboard.auth import SecureAuthManager
+    45	# >>> auth_manager = SecureAuthManager()
+    46	# >>> print(auth_manager.generate_token_for_user('admin_user', role='admin'))
+    47	ADMIN_TOKEN_FOR_TEST = "SET_YOUR_ADMIN_TOKEN_HERE" # <<<--- !!! REPLACE THIS !!!
+    48	
+    49	# --- Initialization ---
+    50	# Initialize the authentication manager.
+    51	# Default settings: 24-hour token validity, 5 failed login attempts before lockout, 15-minute lockout duration.
+    52	auth_manager = SecureAuthManager()
+    53	
+    54	# Initialize the dashboard server, injecting the authentication manager.
+    55	dashboard_server = DashboardServer(auth_manager=auth_manager)
+    56	
+    57	# --- FastAPI Application Setup ---
+    58	app = FastAPI(
+    59	    title="AtriaTrade Dashboard API",
+    60	    description="API for managing and monitoring the AtriaTrade bot. Provides real-time data and control capabilities.",
+    61	    version="1.1.0",
+    62	    contact={
+    63	        "name": "AtriaTrade Support Team",
+    64	        "url": "https://atria.trade/support",
+    65	        "email": "support@atria.trade",
+    66	    },
+    67	    license_info={
+    68	        "name": "MIT License",
+    69	        "url": "https://opensource.org/licenses/MIT",
+    70	    },
+    71	)
+    72	
+    73	# --- Security Dependencies ---
+    74	# Configure FastAPI's API Key header dependency.
+    75	api_key_header = APIKeyHeader(name=AUTH_TOKEN_HEADER_NAME, auto_error=True)
+    76	
+    77	# --- Utility Functions ---
+    78	def get_client_ip(request: Request) -> str:
+    79	    """
+    80	    Retrieves the client's IP address from the request.
+    81	    Handles common proxy headers like X-Forwarded-For for accurate IP logging.
+    82	    """
+    83	    if request.client and request.client.host:
+    84	        return request.client.host
+    85	    
+    86	    forwarded_for = request.headers.get("X-Forwarded-For")
+    87	    if forwarded_for:
+    88	        return forwarded_for.split(",")[0].strip()
+    89	        
+    90	    return "127.0.0.1"
+    91	
+    92	
+    93	# --- Pydantic Models for Request/Response Data Validation ---
+    94	
+    95	class PublicStatusResponse(BaseModel):
+    96	    """Response model for the public status endpoint."""
+    97	    system: str = Field(..., description="Name of the system component (e.g., 'AtriaTrade API').")
+    98	    online: bool = Field(..., description="Indicates if the system component is operational.")
+    99	    timestamp: float = Field(..., description="Unix timestamp of when the status was checked.")
+   100	
+   101	class BotStateData(BaseModel):
+   102	    """Detailed data model for the bot's current operational state."""
+   103	    status: str = Field(..., description="Current status of the bot (e.g., RUNNING, STOPPED, PAUSED, ERROR).")
+   104	    mode: str = Field(..., description="Trading mode (e.g., PAPER_TRADING, TESTNET, LIVE_TRADING).")
+   105	    active_positions: int = Field(..., description="Number of currently active trading positions.")
+   106	    total_balance_usdt: float = Field(..., description="Total account balance denominated in USDT.")
+   107	    profit_reserved: float = Field(..., description="Amount of profit currently reserved or set aside in USDT.")
+   108	
+   109	class DashboardSummaryResponse(BaseModel):
+   110	    """Comprehensive response model for the authenticated dashboard summary."""
+   111	    success: bool = Field(..., description="Indicates if the request was processed successfully.")
+   112	    user: Optional[str] = Field(None, description="Username of the authenticated user.")
+   113	    role: Optional[str] = Field(None, description="Role assigned to the user (e.g., 'admin', 'trader', 'viewer').")
+   114	    data: Optional[BotStateData] = Field(None, description="Detailed bot state information, included only on success.")
+   115	    error: Optional[str] = Field(None, description="Error message if the operation failed (e.g., authentication, authorization).")
+   116	
+   117	class UpdateBotStateResponse(BaseModel):
+   118	    """Response model for updating bot state parameters."""
+   119	    success: bool = Field(..., description="Indicates if the state update was successful.")
+   120	    updated_key: Optional[str] = Field(None, description="The specific key that was modified.")
+   121	    new_value: Optional[Any] = Field(None, description="The new value assigned to the updated key.")
+   122	    error: Optional[str] = Field(None, description="Error message if the update failed.")
+   123	
+   124	# --- API Endpoints Definition ---
+   125	
+   126	@app.get(
+   127	    "/api/public/status",
+   128	    response_model=PublicStatusResponse,
+   129	    summary="Get Public System Status",
+   130	    tags=["Public Endpoints"],
+   131	    description="Provides a simple, unauthenticated health check for the AtriaTrade API service."
+   132	)
+   133	async def get_public_status_endpoint(request: Request): # CORRECTED: Removed `= Request(...)`
+   134	    """
+   135	    Public endpoint to check if the API service is running.
+   136	    """
+   137	    return PublicStatusResponse(
+   138	        system="AtriaTrade API",
+   139	        online=True,
+   140	        timestamp=time.time()
+   141	    )
+   142	
+   143	@app.get(
+   144	    "/api/dashboard/summary",
+   145	    response_model=DashboardSummaryResponse,
+   146	    summary="Get Authenticated Dashboard Summary",
+   147	    tags=["Dashboard API"],
+   148	    dependencies=[Depends(api_key_header)],
+   149	    description="Retrieves detailed bot status, user information, and trading data. Requires a valid authentication token."
+   150	)
+   151	async def get_dashboard_summary_endpoint(
+   152	    request: Request,
+   153	    token: str = Depends(api_key_header),
+   154	):
+   155	    """
+   156	    Fetches the main dashboard summary data. Requires authentication via `X-Auth-Token` header.
+   157	    Returns user details and bot operational state if the token is valid.
+   158	    """
+   159	    client_ip = get_client_ip(request)
+   160	    result = await dashboard_server.get_dashboard_summary(token=token, client_ip=client_ip)
+   161	
+   162	    if not result.get("success", False):
+   163	        raise HTTPException(
+   164	            status_code=401,
+   165	            detail={"message": result.get("error", "Authentication failed. Invalid or expired token.")}
+   166	        )
+   167	
+   168	    bot_data = None
+   169	    if "data" in result and result["data"]:
+   170	        try:
+   171	            bot_data = BotStateData(**result["data"])
+   172	        except Exception as e:
+   173	            print(f"Error parsing BotStateData: {e}")
+   174	            raise HTTPException(
+   175	                status_code=500,
+   176	                detail={"message": "Internal server error processing dashboard data."}
+   177	            )
+   178	
+   179	    return DashboardSummaryResponse(
+   180	        success=True,
+   181	        user=result.get("user"),
+   182	        role=result.get("role"),
+   183	        data=bot_data
+   184	    )
+   185	
+   186	@app.put(
+   187	    "/api/bot/state",
+   188	    response_model=UpdateBotStateResponse,
+   189	    summary="Update Bot State Parameter (Admin Only)",
+   190	    tags=["Admin Control"],
+   191	    dependencies=[Depends(api_key_header)],
+   192	    description="Allows authenticated administrators to modify specific bot state parameters dynamically. Requires 'admin' role."
+   193	)
+   194	async def update_bot_state_endpoint(
+   195	    request: Request,
+   196	    key: str,
+   197	    value: Any,
+   198	    token: str = Depends(api_key_header),
+   199	):
+   200	    """
+   201	    Endpoint to update a specific parameter in the bot's state.
+   202	    Requires authentication and the user must have admin privileges.
+   203	    Example Usage: PUT /api/bot/state?key=mode&value="LIVE_TRADING"
+   204	    """
+   205	    client_ip = get_client_ip(request)
+   206	    result = await dashboard_server.update_bot_state(key=key, value=value, token=token, client_ip=client_ip)
+   207	
+   208	    if not result.get("success", False):
+   209	        error_message = result.get("error", "Unknown error during state update.")
+   210	        status_code = 403
+   211	
+   212	        if "Unauthorized" in error_message or "Invalid token" in error_message:
+   213	            status_code = 401
+   214	        elif "Not an administrator" in error_message or "permission denied" in error_message:
+   215	            status_code = 403
+   216	        else:
+   217	            status_code = 500
+   218	
+   219	        raise HTTPException(status_code=status_code, detail={"message": error_message})
+   220	
+   221	    return UpdateBotStateResponse(
+   222	        success=True,
+   223	        updated_key=result.get("updated_key"),
+   224	        new_value=result.get("new_value")
+   225	    )
+   226	
+   227	# --- Main Execution Block for Development Server ---
+   228	if __name__ == "__main__":
+   229	    HOST = "127.0.0.1"
+   230	    PORT = 8080
+   231	
+   232	    print("\n" + "=" * 60)
+   233	    print("🚀 Starting AtriaTrade Dashboard API Server...")
+   234	    print(f"   Host: {HOST}")
+   235	    print(f"   Port: {PORT}")
+   236	    print(f"   Access API Docs at: http://{HOST}:{PORT}/docs")
+   237	    print("   Access ReDoc at: http://{HOST}:{PORT}/redoc")
+   238	    print("=" * 60 + "\n")
+   239	    
+   240	    print("💡 Quick Tip for Generating Admin Tokens:")
+   241	    print("   1. Open a Python console in Termux:")
+   242	    print("      source ~/AtriaTrade/venv/bin/activate  (if using venv)")
+   243	    print("      python")
+   244	    print("   2. Inside Python console, run:")
+   245	    print("      >>> from src.dashboard.auth import SecureAuthManager")
+   246	    print("      >>> auth_manager = SecureAuthManager()")
+   247	    print(f"      >>> print(auth_manager.generate_token_for_user('your_admin_username', role='admin'))")
+   248	    print(f"   3. Copy the generated token and replace 'SET_YOUR_ADMIN_TOKEN_HERE' in this app.py file.")
+   249	    print("\n")
+   250	
+   251	    try:
+   252	        uvicorn.run(
+   253	            "src.web.app:app",
+   254	            host=HOST,
+   255	            port=PORT,
+   256	            reload=True
+   257	        )
+   258	    except Exception as e:
+   259	        print(f"🚨 Server failed to start. An error occurred: {e}")
+   260	        print("   Please check the imports and configuration.")
+   261	
+
+===== TEMPLATES =====
+src/web/templates/index.html
+src/web/templates/login.html
+src/web/templates/dashboard.html
+
+===== CURRENT APP ROUTES =====
+3:FastAPI application for AtriaTrade Dashboard.
+4:Integrates DashboardServer for bot telemetry and control.
+7:from fastapi import FastAPI, HTTPException, Request, Depends
+51:# Default settings: 24-hour token validity, 5 failed login attempts before lockout, 15-minute lockout duration.
+57:# --- FastAPI Application Setup ---
+58:app = FastAPI(
+74:# Configure FastAPI's API Key header dependency.
+78:def get_client_ip(request: Request) -> str:
+93:# --- Pydantic Models for Request/Response Data Validation ---
+110:    """Comprehensive response model for the authenticated dashboard summary."""
+126:@app.get(
+129:    summary="Get Public System Status",
+133:async def get_public_status_endpoint(request: Request): # CORRECTED: Removed `= Request(...)`
+143:@app.get(
+144:    "/api/dashboard/summary",
+146:    summary="Get Authenticated Dashboard Summary",
+151:async def get_dashboard_summary_endpoint(
+152:    request: Request,
+156:    Fetches the main dashboard summary data. Requires authentication via `X-Auth-Token` header.
+160:    result = await dashboard_server.get_dashboard_summary(token=token, client_ip=client_ip)
+186:@app.put(
+187:    "/api/bot/state",
+189:    summary="Update Bot State Parameter (Admin Only)",
+195:    request: Request,
+203:    Example Usage: PUT /api/bot/state?key=mode&value="LIVE_TRADING"

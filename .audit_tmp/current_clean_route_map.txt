@@ -1,0 +1,315 @@
+./src/dashboard/server.py:3:Provides secure endpoints for bot telemetry, status, and control.
+./src/web/server.py:2:from fastapi import FastAPI, Request, Form, Depends, HTTPException, status
+./src/web/server.py:5:from fastapi.templating import Jinja2Templates
+./src/web/server.py:6:import uvicorn
+./src/web/server.py:9:app = FastAPI(title="AtriaTrade Web Console")
+./src/web/server.py:17:templates = Jinja2Templates(directory=os.path.join(current_dir, "templates"))
+./src/web/server.py:43:@app.get("/login", response_class=HTMLResponse)
+./src/web/server.py:45:    return templates.TemplateResponse("login.html", {"request": request, "error": None})
+./src/web/server.py:47:@app.post("/login", response_class=HTMLResponse)
+./src/web/server.py:57:        return templates.TemplateResponse("login.html", {
+./src/web/server.py:62:@app.get("/logout")
+./src/web/server.py:71:@app.get("/", response_class=HTMLResponse)
+./src/web/server.py:73:    return templates.TemplateResponse("dashboard.html", {
+./src/web/server.py:78:@app.get("/api/status")
+./src/web/server.py:82:@app.post("/api/bot/start")
+./src/web/server.py:88:@app.post("/api/bot/stop")
+./src/web/server.py:95:    uvicorn.run(app, host="127.0.0.1", port=8080)
+./src/web/templates/index.html:27:        fetch('/health').then(res => res.json()).then(data => {
+./src/web/templates/dashboard.html:142:                const res = await fetch('/api/telemetry');
+./src/web/templates/dashboard.html:193:            await fetch('/api/action', {
+./src/web/main.py:3:from fastapi import FastAPI, Request
+./src/web/main.py:6:from fastapi.templating import Jinja2Templates
+./src/web/main.py:14:app = FastAPI(title="AtriaTrade Dashboard")
+./src/web/main.py:25:app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+./src/web/main.py:26:templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+./src/web/main.py:28:@app.get("/", response_class=HTMLResponse)
+./src/web/main.py:30:    return templates.TemplateResponse("index.html", {"request": request, "status": "Paper Mode (Safe)"})
+./src/web/main.py:32:@app.get("/health")
+./src/web/app.py:15:import uvicorn
+./src/web/app.py:16:from fastapi import Depends, FastAPI, HTTPException, Request
+./src/web/app.py:20:from fastapi.templating import Jinja2Templates
+./src/web/app.py:53:# FastAPI app
+./src/web/app.py:55:app = FastAPI(
+./src/web/app.py:63:templates = Jinja2Templates(directory=TEMPLATES_DIR)
+./src/web/app.py:66:    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+./src/web/app.py:130:@app.get("/", response_class=HTMLResponse)
+./src/web/app.py:132:    return templates.TemplateResponse(
+./src/web/app.py:138:@app.get("/dashboard", response_class=HTMLResponse)
+./src/web/app.py:140:    return templates.TemplateResponse(
+./src/web/app.py:149:@app.get(
+./src/web/app.py:163:@app.get(
+./src/web/app.py:220:@app.put(
+./src/web/app.py:265:    PORT = 8080
+./src/web/app.py:275:    uvicorn.run(
+./src/web/index.html:149:                const res = await fetch("/api/telemetry?t=" + Date.now());
+./src/web/index.html:200:            await fetch("/api/order/manual", {
+./src/web/index.html:209:            await fetch(url, { method: "POST" });
+./requirements.txt:31:uvicorn==0.52.4
+./.pytest_cache/v/cache/nodeids:502:  "tests/test_web_server.py::test_websocket_broadcast_and_heartbeat",
+./server.log:5:INFO:     Uvicorn running on http://127.0.0.1:8080 (Press CTRL+C to quit)
+./make_app.py:9:from fastapi import FastAPI, HTTPException
+./make_app.py:111:app = FastAPI(title="AtriaTrade Paper Trading Engine", version="0.2.0")
+./make_app.py:249:@app.on_event("startup")
+./make_app.py:253:@app.get("/api/telemetry")
+./make_app.py:254:def get_telemetry():
+./make_app.py:270:@app.post("/api/order/manual")
+./make_app.py:277:@app.post("/api/order/close")
+./make_app.py:284:@app.post("/api/autopilot/toggle")
+./make_app.py:292:@app.post("/api/panic")
+./make_app.py:301:@app.get("/api/export/csv")
+./make_app.py:312:@app.post("/api/autopilot/toggle")
+./make_app.py:320:@app.post("/api/panic")
+./make_app.py:329:@app.get("/api/export/csv")
+./make_app.py:459:                const res = await fetch("/api/telemetry");
+./make_app.py:512:            await fetch("/api/order/manual", {
+./make_app.py:521:            await fetch("/api/order/close", { method: "POST" });
+./make_app.py:526:            await fetch("/api/autopilot/toggle", { method: "POST" });
+./make_app.py:532:                await fetch("/api/panic", { method: "POST" });
+./make_app.py:543:@app.get("/", response_class=HTMLResponse)
+./run_paper_dashboard.py:4:import uvicorn
+./run_paper_dashboard.py:15:    print("🌐 Dashboard URL: http://127.0.0.1:8080")
+./run_paper_dashboard.py:18:    uvicorn.run(
+./run_paper_dashboard.py:21:        port=8080,
+./atria_web_legacy_sources.txt:9:from fastapi import FastAPI, Request, BackgroundTasks, HTTPException, Response, Cookie
+./atria_web_legacy_sources.txt:13:app = FastAPI(title="AtriaTrade Master Secured Cockpit", version="2.5.0")
+./atria_web_legacy_sources.txt:213:@app.on_event("startup")
+./atria_web_legacy_sources.txt:243:@app.post("/api/auth/login")
+./atria_web_legacy_sources.txt:254:@app.on_event("startup")
+./atria_web_legacy_sources.txt:284:@app.post("/api/auth/login")
+./atria_web_legacy_sources.txt:293:@app.get("/api/auth/check")
+./atria_web_legacy_sources.txt:300:@app.get("/api/status")
+./atria_web_legacy_sources.txt:304:@app.post("/api/bot/stop")
+./atria_web_legacy_sources.txt:310:@app.post("/api/bot/set_mode")
+./atria_web_legacy_sources.txt:318:@app.post("/api/bot/config")
+./atria_web_legacy_sources.txt:327:@app.post("/api/trade/market")
+./atria_web_legacy_sources.txt:332:@app.post("/api/trade/panic")
+./atria_web_legacy_sources.txt:337:@app.post("/api/wallet/deposit")
+./atria_web_legacy_sources.txt:342:@app.post("/api/wallet/withdraw")
+./atria_web_legacy_sources.txt:350:@app.get("/", response_class=HTMLResponse)
+./atria_web_legacy_sources.txt:708:            const res = await fetch('/api/auth/check');
+./atria_web_legacy_sources.txt:720:        const res = await fetch('/api/auth/login', {
+./atria_web_legacy_sources.txt:781:            const res = await fetch('/api/status');
+./atria_web_legacy_sources.txt:851:    async function startBot() { await fetch('/api/bot/start', {method: 'POST'}); fetchStatus(); }
+./atria_web_legacy_sources.txt:852:    async function stopBot() { await fetch('/api/bot/stop', {method: 'POST'}); fetchStatus(); }
+./atria_web_legacy_sources.txt:853:    async function panicKill() { await fetch('/api/trade/panic', {method: 'POST'}); fetchStatus(); }
+./atria_web_legacy_sources.txt:855:        await fetch('/api/bot/set_mode', {
+./atria_web_legacy_sources.txt:865:        await fetch('/api/trade/market', {
+./atria_web_legacy_sources.txt:875:        await fetch('/api/bot/config', {
+./atria_web_legacy_sources.txt:885:            await fetch('/api/wallet/deposit', {
+./atria_web_legacy_sources.txt:897:            await fetch('/api/wallet/withdraw', {
+./atria_web_legacy_sources.txt:922:from fastapi import FastAPI, Request, BackgroundTasks, HTTPException, Response, Cookie
+./atria_web_legacy_sources.txt:926:app = FastAPI(title="AtriaTrade Master Secured Cockpit", version="2.5.0")
+./atria_web_legacy_sources.txt:1126:@app.on_event("startup")
+./atria_web_legacy_sources.txt:1156:@app.post("/api/auth/login")
+./atria_web_legacy_sources.txt:1167:@app.on_event("startup")
+./atria_web_legacy_sources.txt:1197:@app.post("/api/auth/login")
+./atria_web_legacy_sources.txt:1206:@app.get("/api/auth/check")
+./atria_web_legacy_sources.txt:1213:@app.get("/api/status")
+./atria_web_legacy_sources.txt:1217:@app.post("/api/bot/stop")
+./atria_web_legacy_sources.txt:1223:@app.post("/api/bot/set_mode")
+./atria_web_legacy_sources.txt:1231:@app.post("/api/bot/config")
+./atria_web_legacy_sources.txt:1240:@app.post("/api/trade/market")
+./atria_web_legacy_sources.txt:1245:@app.post("/api/trade/panic")
+./atria_web_legacy_sources.txt:1250:@app.post("/api/wallet/deposit")
+./atria_web_legacy_sources.txt:1255:@app.post("/api/wallet/withdraw")
+./atria_web_legacy_sources.txt:1263:@app.get("/", response_class=HTMLResponse)
+./atria_web_legacy_sources.txt:1621:            const res = await fetch('/api/auth/check');
+./atria_web_legacy_sources.txt:1633:        const res = await fetch('/api/auth/login', {
+./atria_web_legacy_sources.txt:1694:            const res = await fetch('/api/status');
+./atria_web_legacy_sources.txt:1764:    async function startBot() { await fetch('/api/bot/start', {method: 'POST'}); fetchStatus(); }
+./atria_web_legacy_sources.txt:1765:    async function stopBot() { await fetch('/api/bot/stop', {method: 'POST'}); fetchStatus(); }
+./atria_web_legacy_sources.txt:1766:    async function panicKill() { await fetch('/api/trade/panic', {method: 'POST'}); fetchStatus(); }
+./atria_web_legacy_sources.txt:1768:        await fetch('/api/bot/set_mode', {
+./atria_web_legacy_sources.txt:1778:        await fetch('/api/trade/market', {
+./atria_web_legacy_sources.txt:1788:        await fetch('/api/bot/config', {
+./atria_web_legacy_sources.txt:1798:            await fetch('/api/wallet/deposit', {
+./atria_web_legacy_sources.txt:1810:            await fetch('/api/wallet/withdraw', {
+./atria_web_legacy_sources.txt:1829:from fastapi import FastAPI, Request, Form, Depends, HTTPException, status
+./atria_web_legacy_sources.txt:1832:from fastapi.templating import Jinja2Templates
+./atria_web_legacy_sources.txt:1833:import uvicorn
+./atria_web_legacy_sources.txt:1836:app = FastAPI(title="AtriaTrade Web Console")
+./atria_web_legacy_sources.txt:1844:templates = Jinja2Templates(directory=os.path.join(current_dir, "templates"))
+./atria_web_legacy_sources.txt:1870:@app.get("/login", response_class=HTMLResponse)
+./atria_web_legacy_sources.txt:1872:    return templates.TemplateResponse("login.html", {"request": request, "error": None})
+./atria_web_legacy_sources.txt:1874:@app.post("/login", response_class=HTMLResponse)
+./atria_web_legacy_sources.txt:1884:        return templates.TemplateResponse("login.html", {
+./atria_web_legacy_sources.txt:1889:@app.get("/logout")
+./atria_web_legacy_sources.txt:1898:@app.get("/", response_class=HTMLResponse)
+./atria_web_legacy_sources.txt:1900:    return templates.TemplateResponse("dashboard.html", {
+./atria_web_legacy_sources.txt:1905:@app.get("/api/status")
+./atria_web_legacy_sources.txt:1909:@app.post("/api/bot/start")
+./atria_web_legacy_sources.txt:1915:@app.post("/api/bot/stop")
+./atria_web_legacy_sources.txt:1922:    uvicorn.run(app, host="127.0.0.1", port=8080)
+./atria_web_legacy_sources.txt:1927:from fastapi import FastAPI, Request
+./atria_web_legacy_sources.txt:1930:from fastapi.templating import Jinja2Templates
+./atria_web_legacy_sources.txt:1938:app = FastAPI(title="AtriaTrade Dashboard")
+./atria_web_legacy_sources.txt:1949:app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+./atria_web_legacy_sources.txt:1950:templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+./atria_web_legacy_sources.txt:1952:@app.get("/", response_class=HTMLResponse)
+./atria_web_legacy_sources.txt:1954:    return templates.TemplateResponse("index.html", {"request": request, "status": "Paper Mode (Safe)"})
+./atria_web_legacy_sources.txt:1956:@app.get("/health")
+./current_web_inspection.txt:5:     3	FastAPI application for AtriaTrade Dashboard.
+./current_web_inspection.txt:6:     4	Integrates DashboardServer for bot telemetry and control.
+./current_web_inspection.txt:9:     7	from fastapi import FastAPI, HTTPException, Request, Depends
+./current_web_inspection.txt:13:    11	import uvicorn
+./current_web_inspection.txt:59:    57	# --- FastAPI Application Setup ---
+./current_web_inspection.txt:60:    58	app = FastAPI(
+./current_web_inspection.txt:76:    74	# Configure FastAPI's API Key header dependency.
+./current_web_inspection.txt:128:   126	@app.get(
+./current_web_inspection.txt:145:   143	@app.get(
+./current_web_inspection.txt:188:   186	@app.put(
+./current_web_inspection.txt:232:   230	    PORT = 8080
+./current_web_inspection.txt:254:   252	        uvicorn.run(
+./current_web_inspection.txt:271:3:FastAPI application for AtriaTrade Dashboard.
+./current_web_inspection.txt:272:4:Integrates DashboardServer for bot telemetry and control.
+./current_web_inspection.txt:273:7:from fastapi import FastAPI, HTTPException, Request, Depends
+./current_web_inspection.txt:275:57:# --- FastAPI Application Setup ---
+./current_web_inspection.txt:276:58:app = FastAPI(
+./current_web_inspection.txt:277:74:# Configure FastAPI's API Key header dependency.
+./current_web_inspection.txt:281:126:@app.get(
+./current_web_inspection.txt:284:143:@app.get(
+./current_web_inspection.txt:291:186:@app.put(
+./app_source_current.txt:15:    15	import uvicorn
+./app_source_current.txt:16:    16	from fastapi import Depends, FastAPI, HTTPException, Request
+./app_source_current.txt:20:    20	from fastapi.templating import Jinja2Templates
+./app_source_current.txt:53:    53	# FastAPI app
+./app_source_current.txt:55:    55	app = FastAPI(
+./app_source_current.txt:63:    63	templates = Jinja2Templates(directory=TEMPLATES_DIR)
+./app_source_current.txt:66:    66	    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+./app_source_current.txt:130:   130	@app.get("/", response_class=HTMLResponse)
+./app_source_current.txt:132:   132	    return templates.TemplateResponse(
+./app_source_current.txt:138:   138	@app.get("/dashboard", response_class=HTMLResponse)
+./app_source_current.txt:140:   140	    return templates.TemplateResponse(
+./app_source_current.txt:149:   149	@app.get(
+./app_source_current.txt:163:   163	@app.get(
+./app_source_current.txt:220:   220	@app.put(
+./app_source_current.txt:265:   265	    PORT = 8080
+./app_source_current.txt:275:   275	    uvicorn.run(
+./dashboard_source_current.txt:142:   142	                const res = await fetch('/api/telemetry');
+./dashboard_source_current.txt:193:   193	            await fetch('/api/action', {
+./dashboard_server_source.txt:3:     3	Provides secure endpoints for bot telemetry, status, and control.
+./index_html_current.txt:27:    27	        fetch('/health').then(res => res.json()).then(data => {
+./four_sources_current.txt:16:    15	import uvicorn
+./four_sources_current.txt:17:    16	from fastapi import Depends, FastAPI, HTTPException, Request
+./four_sources_current.txt:21:    20	from fastapi.templating import Jinja2Templates
+./four_sources_current.txt:54:    53	# FastAPI app
+./four_sources_current.txt:56:    55	app = FastAPI(
+./four_sources_current.txt:64:    63	templates = Jinja2Templates(directory=TEMPLATES_DIR)
+./four_sources_current.txt:67:    66	    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+./four_sources_current.txt:131:   130	@app.get("/", response_class=HTMLResponse)
+./four_sources_current.txt:133:   132	    return templates.TemplateResponse(
+./four_sources_current.txt:139:   138	@app.get("/dashboard", response_class=HTMLResponse)
+./four_sources_current.txt:141:   140	    return templates.TemplateResponse(
+./four_sources_current.txt:150:   149	@app.get(
+./four_sources_current.txt:164:   163	@app.get(
+./four_sources_current.txt:221:   220	@app.put(
+./four_sources_current.txt:266:   265	    PORT = 8080
+./four_sources_current.txt:276:   275	    uvicorn.run(
+./four_sources_current.txt:309:    27	        fetch('/health').then(res => res.json()).then(data => {
+./dashboard_audit.txt:19:src/web/app.py.bak_debug_telemetry
+./dashboard_audit.txt:20:src/web/index.html.bak_debug_telemetry
+./dashboard_audit.txt:338:src/dashboard/server.py:3:Provides secure endpoints for bot telemetry, status, and control.
+./dashboard_audit.txt:370:src/web/server.py:2:from fastapi import FastAPI, Request, Form, Depends, HTTPException, status
+./dashboard_audit.txt:373:src/web/server.py:45:    return templates.TemplateResponse("login.html", {"request": request, "error": None})
+./dashboard_audit.txt:376:src/web/server.py:57:        return templates.TemplateResponse("login.html", {
+./dashboard_audit.txt:377:src/web/server.py:73:    return templates.TemplateResponse("dashboard.html", {
+./dashboard_audit.txt:379:src/web/server.py:78:@app.get("/api/status")
+./dashboard_audit.txt:390:src/web/templates/index.html:27:        fetch('/health').then(res => res.json()).then(data => {
+./dashboard_audit.txt:393:src/web/templates/dashboard.html:142:                const res = await fetch('/api/telemetry');
+./dashboard_audit.txt:418:src/web/main.py:30:    return templates.TemplateResponse("index.html", {"request": request, "status": "Paper Mode (Safe)"})
+./dashboard_audit.txt:419:src/web/main.py:32:@app.get("/health")
+./dashboard_audit.txt:424:src/web/app.py:132:    return templates.TemplateResponse(
+./dashboard_audit.txt:426:src/web/app.py:140:    return templates.TemplateResponse(
+./dashboard_audit.txt:440:src/web/index.html:149:                const res = await fetch("/api/telemetry?t=" + Date.now());
+./dashboard_audit.txt:447:src/web/app.py.bak:55:@app.get("/api/status")
+./dashboard_audit.txt:464:src/web/app.py.bak2:55:@app.get("/api/status")
+./dashboard_audit.txt:475:src/web/app.py.bak_debug_telemetry:11:from src.core.trading_engine import TradingEngine
+./dashboard_audit.txt:476:src/web/app.py.bak_debug_telemetry:12:from src.core.portfolio_manager import PortfolioManager
+./dashboard_audit.txt:477:src/web/app.py.bak_debug_telemetry:24:portfolio_mgr = PortfolioManager(initial_balance=initial_balance)
+./dashboard_audit.txt:478:src/web/app.py.bak_debug_telemetry:29:engine = TradingEngine(
+./dashboard_audit.txt:479:src/web/app.py.bak_debug_telemetry:78:    index_path = os.path.join(os.path.dirname(__file__), "index.html")
+./dashboard_audit.txt:480:src/web/app.py.bak_debug_telemetry:82:    return HTMLResponse("<h1>داشبورد AtriaTrade: فایل index.html یافت نشد!</h1>", status_code=404)
+./dashboard_audit.txt:481:src/web/app.py.bak_debug_telemetry:84:def build_telemetry_payload():
+./dashboard_audit.txt:482:src/web/app.py.bak_debug_telemetry:85:    summary = portfolio_mgr.get_summary() if hasattr(portfolio_mgr, "get_summary") else {}
+./dashboard_audit.txt:483:src/web/app.py.bak_debug_telemetry:105:        "status": "online",
+./dashboard_audit.txt:484:src/web/app.py.bak_debug_telemetry:113:        "equity": summary.get("equity", current_balance),
+./dashboard_audit.txt:485:src/web/app.py.bak_debug_telemetry:114:        "total_profit": summary.get("total_profit", 0.0),
+./dashboard_audit.txt:486:src/web/app.py.bak_debug_telemetry:123:@app.get("/api/telemetry")
+./dashboard_audit.txt:487:src/web/app.py.bak_debug_telemetry:124:async def get_telemetry():
+./dashboard_audit.txt:488:src/web/app.py.bak_debug_telemetry:125:    return build_telemetry_payload()
+./dashboard_audit.txt:489:src/web/app.py.bak_debug_telemetry:127:@app.get("/api/status")
+./dashboard_audit.txt:490:src/web/app.py.bak_debug_telemetry:128:async def get_status():
+./dashboard_audit.txt:491:src/web/app.py.bak_debug_telemetry:129:    return build_telemetry_payload()
+./dashboard_audit.txt:492:src/web/app.py.bak_debug_telemetry:135:    status_str = "فعال" if is_autopilot_active else "متوقف"
+./dashboard_audit.txt:493:src/web/app.py.bak_debug_telemetry:136:    log_msg = f"سیستم اتوپایلوت {status_str} شد."
+./dashboard_audit.txt:494:src/web/app.py.bak_debug_telemetry:165:            res = {"status": "FILLED", "symbol": req.symbol, "side": req.side, "amount": req.amount, "price": exec_price}
+./dashboard_audit.txt:495:src/web/app.py.bak_debug_telemetry:173:        raise HTTPException(status_code=400, detail=err_msg)
+./dashboard_audit.txt:496:src/web/app.py.bak_debug_telemetry:188:        raise HTTPException(status_code=500, detail=err_msg)
+./dashboard_audit.txt:497:src/web/index.html.bak_debug_telemetry:149:                const res = await fetch("/api/telemetry?t=" + Date.now());
+./dashboard_audit.txt:501:src/web/app.py.bak_import_fix:54:def build_telemetry_payload():
+./dashboard_audit.txt:506:src/web/app.py.bak_import_fix:122:@app.get("/api/telemetry")
+./dashboard_audit.txt:507:src/web/app.py.bak_import_fix:123:async def get_telemetry():
+./dashboard_audit.txt:508:src/web/app.py.bak_import_fix:124:    return build_telemetry_payload()
+./dashboard_audit.txt:509:src/web/app.py.bak_import_fix:126:@app.get("/api/status")
+./dashboard_audit.txt:511:src/web/app.py.bak_import_fix:128:    return build_telemetry_payload()
+./dashboard_audit.txt:530:src/web/app.py.bak_1788593081:96:def build_telemetry_payload():
+./dashboard_audit.txt:535:src/web/app.py.bak_1788593081:163:@app.get("/api/telemetry")
+./dashboard_audit.txt:536:src/web/app.py.bak_1788593081:164:async def get_telemetry():
+./dashboard_audit.txt:537:src/web/app.py.bak_1788593081:165:    return build_telemetry_payload()
+./dashboard_audit.txt:538:src/web/app.py.bak_1788593081:167:@app.get("/api/status")
+./dashboard_audit.txt:540:src/web/app.py.bak_1788593081:169:    return build_telemetry_payload()
+./dashboard_audit.txt:554:src/web/app.py.bak_full_ui:82:@app.get("/api/status")
+./dashboard_audit.txt:555:src/web/app.py.bak_full_ui:83:@app.get("/api/telemetry")
+./dashboard_audit.txt:569:src/web/app.py.backup_20260905_112213:299:@app.get("/api/status")
+./dashboard_audit.txt:584:src/web/app.py.backup_20260905_112213:780:            const res = await fetch('/api/status');
+./dashboard_audit.txt:597:src/web/app.py.bak_pre_fix:299:@app.get("/api/status")
+./dashboard_audit.txt:612:src/web/app.py.bak_pre_fix:780:            const res = await fetch('/api/status');
+./dashboard_audit.txt:619:src/web/app.py.bak.20260905_204900:4:Integrates DashboardServer for bot telemetry and control.
+./dashboard_audit.txt:643:src/web/app.py.bak.20260905_205136:4:Integrates DashboardServer for bot telemetry and control.
+./dashboard_audit.txt:667:src/web/app.py.backup_before_ui_merge_20260905_210454:4:Integrates DashboardServer for bot telemetry and control.
+./dashboard_audit.txt:691:src/web/app.py.backup_before_ui_merge_20260905_211158:4:Integrates DashboardServer for bot telemetry and control.
+./web_runtime_sources.txt:16:import uvicorn
+./web_runtime_sources.txt:17:from fastapi import Depends, FastAPI, HTTPException, Request
+./web_runtime_sources.txt:21:from fastapi.templating import Jinja2Templates
+./web_runtime_sources.txt:54:# FastAPI app
+./web_runtime_sources.txt:56:app = FastAPI(
+./web_runtime_sources.txt:64:templates = Jinja2Templates(directory=TEMPLATES_DIR)
+./web_runtime_sources.txt:67:    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+./web_runtime_sources.txt:131:@app.get("/", response_class=HTMLResponse)
+./web_runtime_sources.txt:133:    return templates.TemplateResponse(
+./web_runtime_sources.txt:139:@app.get("/dashboard", response_class=HTMLResponse)
+./web_runtime_sources.txt:141:    return templates.TemplateResponse(
+./web_runtime_sources.txt:150:@app.get(
+./web_runtime_sources.txt:164:@app.get(
+./web_runtime_sources.txt:221:@app.put(
+./web_runtime_sources.txt:266:    PORT = 8080
+./web_runtime_sources.txt:276:    uvicorn.run(
+./web_runtime_sources.txt:286:from fastapi import FastAPI, Request
+./web_runtime_sources.txt:289:from fastapi.templating import Jinja2Templates
+./web_runtime_sources.txt:297:app = FastAPI(title="AtriaTrade Dashboard")
+./web_runtime_sources.txt:308:app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+./web_runtime_sources.txt:309:templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+./web_runtime_sources.txt:311:@app.get("/", response_class=HTMLResponse)
+./web_runtime_sources.txt:313:    return templates.TemplateResponse("index.html", {"request": request, "status": "Paper Mode (Safe)"})
+./web_runtime_sources.txt:315:@app.get("/health")
+./web_runtime_sources.txt:321:from fastapi import FastAPI, Request, Form, Depends, HTTPException, status
+./web_runtime_sources.txt:324:from fastapi.templating import Jinja2Templates
+./web_runtime_sources.txt:325:import uvicorn
+./web_runtime_sources.txt:328:app = FastAPI(title="AtriaTrade Web Console")
+./web_runtime_sources.txt:336:templates = Jinja2Templates(directory=os.path.join(current_dir, "templates"))
+./web_runtime_sources.txt:362:@app.get("/login", response_class=HTMLResponse)
+./web_runtime_sources.txt:364:    return templates.TemplateResponse("login.html", {"request": request, "error": None})
+./web_runtime_sources.txt:366:@app.post("/login", response_class=HTMLResponse)
+./web_runtime_sources.txt:376:        return templates.TemplateResponse("login.html", {
+./web_runtime_sources.txt:381:@app.get("/logout")
+./web_runtime_sources.txt:390:@app.get("/", response_class=HTMLResponse)
+./web_runtime_sources.txt:392:    return templates.TemplateResponse("dashboard.html", {
+./web_runtime_sources.txt:397:@app.get("/api/status")
+./web_runtime_sources.txt:401:@app.post("/api/bot/start")
+./web_runtime_sources.txt:407:@app.post("/api/bot/stop")
+./web_runtime_sources.txt:414:    uvicorn.run(app, host="127.0.0.1", port=8080)
+./web_runtime_sources.txt:558:                const res = await fetch('/api/telemetry');
+./web_runtime_sources.txt:609:            await fetch('/api/action', {
+./web_runtime_sources.txt:650:        fetch('/health').then(res => res.json()).then(data => {
+./web_runtime_sources.txt:729:Provides secure endpoints for bot telemetry, status, and control.

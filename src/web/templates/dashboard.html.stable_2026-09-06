@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#030712">
+    <meta name="description" content="AtriaTrade Pro Paper Trading Dashboard">
+    <title>AtriaTrade Pro Auto-Pilot</title>
+
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%2303E%3C/svg%3E">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        :root {
+            color-scheme: dark;
+        }
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: system-
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        :root {
+            color-scheme: dark;
+        }
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background:
+                radial-gradient(circle at 10% 0%, rgba(6, 78, 59, 0.22), transparent 30rem),
+                radial-gradient(circle at 100% 20%, rgba(30, 64, 175, 0.18), transparent 28rem),
+                #030712;
+        }
+        button {
+            -webkit-tap-highlight-color: transparent;
+        }
+        .glass-panel {
+            background: linear-gradient(
+                145deg,
+                rgba(17, 24, 39, 0.92),
+                rgba(8, 15, 30, 0.88)
+            );
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(148, 163, 184, 0.14);
+            box-shadow:
+                0 12px 35px rgba(0, 0, 0, 0.25),
+                inset 0 1px 0 rgba(255, 255, 255, 0.03);
+        }
+        .metric-value {
+            direction: ltr;
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+        .status-dot {
+            box-shadow: 0 0 12px currentColor;
+        }
+        .chart-shell {
+            position: relative;
+            height: 12rem;
+            width: 100%;
+        }
+        .disabled-action {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+        .flash-success {
+            animation: flashSuccess 0.7s ease-out;
+        }
+        .flash-error {
+            animation: flashError 0.7s ease-out;
+        }
+        @keyframes flashSuccess {
+            0% { box-shadow: 0 0 0 rgba(16, 185, 129, 0); }
+            50% { box-shadow: 0 0 24px rgba(16, 185, 129, 0.6); }
+            100% { box-shadow: 0 0 0 rgba(16, 185, 129, 0); }
+        }
+        @keyframes flashError {
+            0% { box-shadow: 0 0 0 rgba(244, 63, 94, 0); }
+            50% { box-shadow: 0 0 24px rgba(244, 63, 94, 0.6); }
+            100% { box-shadow: 0 0 0 rgba(244, 63, 94, 0); }
+        }
+    </style>
+</head>
+
+<body class="min-h-screen p-3 sm:p-5 text-gray-100">
+    <main class="mx-auto flex w-full max-w-6xl flex-col gap-4">
+
+        <!-- Header -->
+        <header class="glass-panel flex flex-col gap-3 rounded-2xl p-3 sm:flex-row sm:items-center sm:justify-between">
+            <div class="flex items-center gap-3">
+                <span id="system-dot" class="status-dot inline-block h-3.5 w-3.5 rounded-full bg-emerald-500 text-emerald-500 animate-pulse"></span>
+                <div>
+                    <h1 class="text-sm font-black tracking-wide sm:text-base">
+                        ATRIATRADE AUTO-PILOT
+                    </h1>
+                    <div class="mt-0.5 flex items-center gap-2 text-[10px] text-gray-400">
+                        <span id="connection-status">در حال برقراری اتصال...</span>
+                        <span>•</span>
+                        <span class="text-amber-400 font-bold">PAPER TRADING</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-2">
+                <button
+                    id="auto-btn"
+                    type="button"
+                    onclick="triggerAction('toggle_auto')"
+                    class="rounded-xl bg-emerald-600 px-3.5 py-1.5 text-xs font-bold text-white transition hover:bg-emerald-500 active:scale-95"
+                >
+                    اتوپایلوت: فعال
+                </button>
+
+                <button
+                    id="panic-btn"
+                    type="button"
+                    onclick="triggerAction('panic')"
+                    class="rounded-xl bg-rose-600 px-3.5 py-1.5 text-xs font-bold text-white transition hover:bg-rose-500 active:scale-95"
+                >
+                    🚨 PANIC
+                </button>
+            </div>
+        </header>
+
+        <!-- Metrics -->
+        <section class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div class="glass-panel rounded-2xl border-cyan-500/30 p-3.5">
+                <div class="text-[11px] font-medium text-gray-400">قیمت BTC/USDT</div>
+                <div id="btc-price" class="metric-value mt-1 text-base font-black text-cyan-400 sm:text-lg">$0.00</div>
+            </div>
+
+            <div class="glass-panel rounded-2xl border-blue-500/30 p-3.5">
+                <div class="text-[11px] font-medium text-gray-400">کل سرمایه (Equity)</div>
+                <div id="total-equity" class="metric-value mt-1 text-base font-black text-blue-400 sm:text-lg">$0.00</div>
+            </div>
+
+            <div class="glass-panel rounded-2xl border-amber-500/30 p-3.5">
+                <div class="text-[11px] font-medium text-gray-400">صندوق امن سود</div>
+                <div id="reserve-vault" class="metric-value mt-1 text-base font-black text-amber-400 sm:text-lg">$0.00</div>
+            </div>
+
+            <div class="glass-panel rounded-2xl border-purple-500/30 p-3.5">
+                <div class="text-[11px] font-medium text-gray-400">نرخ برد / سود کل</div>
+                <div id="win-rate-stat" class="metric-value mt-1 text-base font-black text-purple-400 sm:text-lg">0% (+$0.00)</div>
+            </div>
+        </section>
+
+        <!-- Chart Section -->
+        <section class="glass-panel rounded-2xl p-3.5">
+            <div class="mb-2 flex items-center justify-between">
+                <div class="text-xs font-bold text-gray-300">📈 نوسانات زنده قیمت BTC</div>
+                <div class="flex items-center gap-2">
+                    <span id="chart-range" class="font-mono text-[10px] text-gray-400">در انتظار داده</span>
+                    <span class="rounded-full border border-emerald-800 bg-emerald-950 px-2 py-0.5 text-[10px] font-bold text-emerald-400">
+                        LIVE
+                    </span>
+                </div>
+            </div>
+
+            <div class="chart-shell">
+                <canvas id="priceChart"></canvas>
+            </div>
+        </section>
+
+        <!-- Indicators & Position -->
+        <section class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div class="glass-panel flex flex-col justify-between rounded-2xl p-3.5">
+                <div class="text-xs font-bold text-gray-400">تحلیل تکنیکال</div>
+                <div class="mt-2 flex items-center justify-between">
+                    <span class="text-xs text-gray-300">شاخص RSI (14):</span>
+                    <span id="rsi-val" class="text-sm font-bold text-amber-400">--</span>
+                </div>
+                <div class="mt-1 flex items-center justify-between">
+                    <span class="text-xs text-gray-300">روند استراتژی:</span>
+                    <span id="trend-val" class="text-xs font-bold text-emerald-400">--</span>
+                </div>
+            </div>
+
+            <div class="glass-panel flex flex-col justify-between rounded-2xl border-indigo-500/30 p-3.5">
+                <div class="text-xs font-bold text-gray-400">پوزیشن فعال ربات</div>
+                <div id="active-position" class="mt-2 text-xs font-semibold text-gray-200">
+                    بدون معامله باز
+                </div>
+                <div id="pos-pnl" class="mt-1 text-xs font-bold text-gray-500">
+                    PnL: $0.00
+                </div>
+            </div>
+        </section>
+
+        <!-- Manual Actions -->
+        <section class="grid grid-cols-2 gap-3">
+            <button
+                id="buy-btn"
+                type="button"
+                onclick="triggerAction('buy')"
+                class="w-full rounded-xl bg-emerald-600/90 py-2.5 text-xs font-bold text-white shadow-lg transition hover:bg-emerald-500 active:scale-[0.98]"
+            >
+                ↑ خرید دستی 0.02 BTC
+            </button>
+
+            <button
+                id="sell-btn"
+                type="button"
+                onclick="triggerAction('sell')"
+                class="w-full rounded-xl bg-rose-600/90 py-2.5 text-xs font-bold text-white shadow-lg transition hover:bg-rose-500 active:scale-[0.98]"
+            >
+                ↓ فروش دستی 0.02 BTC
+            </button>
+        </section>
+
+        <!-- Trades & Logs -->
+        <section class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div class="glass-panel rounded-2xl p-3">
+                <div class="mb-2 text-xs font-bold text-gray-400">📜 تاریخچه معاملات بسته‌شده</div>
+                <div id="trades-container" class="max-h-40 space-y-1.5 overflow-y-auto text-[11px] text-gray-300">
+                    <p class="text-gray-500">هنوز معامله‌ای ثبت نشده است.</p>
+                </div>
+            </div>
+
+            <div class="glass-panel rounded-2xl p-3">
+                <div class="mb-2 text-xs font-bold text-gray-400">⚡️ رویدادهای زنده سیستم</div>
+                <div id="logs-container" class="max-h-40 space-y-1 overflow-y-auto font-mono text-[10px] text-emerald-400/90">
+                    <p>در انتظار لاگ...</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Footer -->
+        <footer class="flex items-center justify-between px-1 text-[10px] text-gray-500">
+            <span>AtriaTrade Pro • Paper Engine</span>
+            <span id="last-update">آخرین بروزرسانی: --:--:--</span>
+        </footer>
+
+    </main>
+
+    <!-- External Modular Script with cache bust -->
+    <script src="/static/js/dashboard.js?v=2.0"></script>
+</body>
+</html>

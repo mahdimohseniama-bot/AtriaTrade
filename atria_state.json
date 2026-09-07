@@ -1,0 +1,82 @@
+{
+  "status": {
+    "running": true,
+    "symbol": "BTC/USDT",
+    "price": 42010.11,
+    "balance": 995.39,
+    "coin": 0.0,
+    "entry": 0.0,
+    "realized_pnl": -4.61,
+    "unrealized_pnl": 0.0,
+    "total_pnl": -4.61,
+    "wins": 0,
+    "losses": 4,
+    "trades": 8
+  },
+  "trades": [
+    {
+      "ts": 1788725745.773,
+      "side": "BUY",
+      "qty": 0.014287,
+      "price": 41996.0121,
+      "balance": 399.4,
+      "coin": 0.014287
+    },
+    {
+      "ts": 1788725760.293,
+      "side": "SELL",
+      "qty": 0.014287,
+      "price": 42001.4086,
+      "balance": 998.88,
+      "coin": 0.0
+    },
+    {
+      "ts": 1788725760.796,
+      "side": "BUY",
+      "qty": 0.014269,
+      "price": 42001.8425,
+      "balance": 398.95,
+      "coin": 0.014269
+    },
+    {
+      "ts": 1788725777.817,
+      "side": "SELL",
+      "qty": 0.014269,
+      "price": 42007.0864,
+      "balance": 997.75,
+      "coin": 0.0
+    },
+    {
+      "ts": 1788725781.824,
+      "side": "BUY",
+      "qty": 0.014251,
+      "price": 42006.7105,
+      "balance": 398.5,
+      "coin": 0.014251
+    },
+    {
+      "ts": 1788725792.337,
+      "side": "SELL",
+      "qty": 0.014251,
+      "price": 42007.4431,
+      "balance": 996.57,
+      "coin": 0.0
+    },
+    {
+      "ts": 1788725792.839,
+      "side": "BUY",
+      "qty": 0.014234,
+      "price": 42008.7956,
+      "balance": 398.03,
+      "coin": 0.014234
+    },
+    {
+      "ts": 1788725803.353,
+      "side": "SELL",
+      "qty": 0.014234,
+      "price": 42010.1136,
+      "balance": 995.39,
+      "coin": 0.0
+    }
+  ]
+}

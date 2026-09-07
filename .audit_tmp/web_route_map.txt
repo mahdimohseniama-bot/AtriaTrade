@@ -1,0 +1,183 @@
+src/dashboard/server.py:3:Provides secure endpoints for bot telemetry, status, and control.
+src/web/server.py:2:from fastapi import FastAPI, Request, Form, Depends, HTTPException, status
+src/web/server.py:5:from fastapi.templating import Jinja2Templates
+src/web/server.py:6:import uvicorn
+src/web/server.py:9:app = FastAPI(title="AtriaTrade Web Console")
+src/web/server.py:17:templates = Jinja2Templates(directory=os.path.join(current_dir, "templates"))
+src/web/server.py:43:@app.get("/login", response_class=HTMLResponse)
+src/web/server.py:45:    return templates.TemplateResponse("login.html", {"request": request, "error": None})
+src/web/server.py:47:@app.post("/login", response_class=HTMLResponse)
+src/web/server.py:57:        return templates.TemplateResponse("login.html", {
+src/web/server.py:62:@app.get("/logout")
+src/web/server.py:71:@app.get("/", response_class=HTMLResponse)
+src/web/server.py:73:    return templates.TemplateResponse("dashboard.html", {
+src/web/server.py:78:@app.get("/api/status")
+src/web/server.py:82:@app.post("/api/bot/start")
+src/web/server.py:88:@app.post("/api/bot/stop")
+src/web/server.py:95:    uvicorn.run(app, host="127.0.0.1", port=8080)
+src/web/templates/dashboard.html:142:                const res = await fetch('/api/telemetry');
+src/web/server.py.before_web_tests_fix:3:Provides FastAPI-based REST API and WebSocket endpoints for dashboard monitoring and control.
+src/web/server.py.before_web_tests_fix:8:from fastapi import FastAPI, Depends, HTTPException, Header, WebSocket, WebSocketDisconnect
+src/web/server.py.before_web_tests_fix:56:        self.app = FastAPI(title="AtriaTrade API", version="1.0.0")
+src/web/main.py:3:from fastapi import FastAPI, Request
+src/web/main.py:6:from fastapi.templating import Jinja2Templates
+src/web/main.py:14:app = FastAPI(title="AtriaTrade Dashboard")
+src/web/main.py:25:app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+src/web/main.py:26:templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+src/web/main.py:28:@app.get("/", response_class=HTMLResponse)
+src/web/main.py:30:    return templates.TemplateResponse("index.html", {"request": request, "status": "Paper Mode (Safe)"})
+src/web/main.py:32:@app.get("/health")
+src/web/app.py:15:import uvicorn
+src/web/app.py:16:from fastapi import Depends, FastAPI, HTTPException, Request
+src/web/app.py:20:from fastapi.templating import Jinja2Templates
+src/web/app.py:53:# FastAPI app
+src/web/app.py:55:app = FastAPI(
+src/web/app.py:63:templates = Jinja2Templates(directory=TEMPLATES_DIR)
+src/web/app.py:66:    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+src/web/app.py:130:@app.get("/", response_class=HTMLResponse)
+src/web/app.py:132:    return templates.TemplateResponse(
+src/web/app.py:138:@app.get("/dashboard", response_class=HTMLResponse)
+src/web/app.py:140:    return templates.TemplateResponse(
+src/web/app.py:149:@app.get(
+src/web/app.py:163:@app.get(
+src/web/app.py:220:@app.put(
+src/web/app.py:275:    uvicorn.run(
+src/web/index.html:149:                const res = await fetch("/api/telemetry?t=" + Date.now());
+src/web/app.py.bak:6:from fastapi import FastAPI, HTTPException
+src/web/app.py.bak:21:app = FastAPI(title="AtriaTrade Paper Trading Dashboard")
+src/web/app.py.bak:47:@app.get("/", response_class=HTMLResponse)
+src/web/app.py.bak:55:@app.get("/api/status")
+src/web/app.py.bak:82:@app.post("/api/toggle_autopilot")
+src/web/app.py.bak:92:@app.post("/api/order/manual")
+src/web/app.py.bak:125:@app.post("/api/panic")
+src/web/app.py.bak2:6:from fastapi import FastAPI, HTTPException
+src/web/app.py.bak2:21:app = FastAPI(title="AtriaTrade Paper Trading Dashboard")
+src/web/app.py.bak2:47:@app.get("/", response_class=HTMLResponse)
+src/web/app.py.bak2:55:@app.get("/api/status")
+src/web/app.py.bak2:82:@app.post("/api/toggle_autopilot")
+src/web/app.py.bak2:92:@app.post("/api/order/manual")
+src/web/app.py.bak2:125:@app.post("/api/panic")
+src/web/app.py.bak_debug_telemetry:6:from fastapi import FastAPI, HTTPException
+src/web/app.py.bak_debug_telemetry:20:app = FastAPI(title="AtriaTrade Paper Trading Dashboard")
+src/web/app.py.bak_debug_telemetry:76:@app.get("/", response_class=HTMLResponse)
+src/web/app.py.bak_debug_telemetry:84:def build_telemetry_payload():
+src/web/app.py.bak_debug_telemetry:123:@app.get("/api/telemetry")
+src/web/app.py.bak_debug_telemetry:124:async def get_telemetry():
+src/web/app.py.bak_debug_telemetry:125:    return build_telemetry_payload()
+src/web/app.py.bak_debug_telemetry:127:@app.get("/api/status")
+src/web/app.py.bak_debug_telemetry:129:    return build_telemetry_payload()
+src/web/app.py.bak_debug_telemetry:131:@app.post("/api/toggle_autopilot")
+src/web/app.py.bak_debug_telemetry:141:@app.post("/api/order/manual")
+src/web/app.py.bak_debug_telemetry:175:@app.post("/api/panic")
+src/web/index.html.bak_debug_telemetry:149:                const res = await fetch("/api/telemetry?t=" + Date.now());
+src/web/app.py.bak_import_fix:5:from fastapi import FastAPI, HTTPException
+src/web/app.py.bak_import_fix:13:app = FastAPI(title="AtriaTrade Paper Trading Engine", version="1.0.0")
+src/web/app.py.bak_import_fix:46:@app.get("/", response_class=HTMLResponse)
+src/web/app.py.bak_import_fix:54:def build_telemetry_payload():
+src/web/app.py.bak_import_fix:122:@app.get("/api/telemetry")
+src/web/app.py.bak_import_fix:123:async def get_telemetry():
+src/web/app.py.bak_import_fix:124:    return build_telemetry_payload()
+src/web/app.py.bak_import_fix:126:@app.get("/api/status")
+src/web/app.py.bak_import_fix:128:    return build_telemetry_payload()
+src/web/app.py.bak_import_fix:130:@app.post("/api/toggle_autopilot")
+src/web/app.py.bak_import_fix:138:@app.post("/api/order/manual")
+src/web/app.py.bak_import_fix:168:@app.post("/api/order/close")
+src/web/app.py.bak_import_fix:193:@app.post("/api/panic")
+src/web/app.py.bak_1788593081:6:from fastapi import FastAPI, HTTPException
+src/web/app.py.bak_1788593081:24:app = FastAPI(title="AtriaTrade Paper Trading Engine", version="1.0.0")
+src/web/app.py.bak_1788593081:88:@app.get("/", response_class=HTMLResponse)
+src/web/app.py.bak_1788593081:96:def build_telemetry_payload():
+src/web/app.py.bak_1788593081:163:@app.get("/api/telemetry")
+src/web/app.py.bak_1788593081:164:async def get_telemetry():
+src/web/app.py.bak_1788593081:165:    return build_telemetry_payload()
+src/web/app.py.bak_1788593081:167:@app.get("/api/status")
+src/web/app.py.bak_1788593081:169:    return build_telemetry_payload()
+src/web/app.py.bak_1788593081:171:@app.post("/api/toggle_autopilot")
+src/web/app.py.bak_1788593081:179:@app.post("/api/order/manual")
+src/web/app.py.bak_1788593081:221:@app.post("/api/order/close")
+src/web/app.py.bak_1788593081:253:@app.post("/api/panic")
+src/web/app.py.bak_full_ui:1:from fastapi import FastAPI, Request
+src/web/app.py.bak_full_ui:4:from fastapi.templating import Jinja2Templates
+src/web/app.py.bak_full_ui:8:app = FastAPI(title="AtriaTrade Pro Dashboard")
+src/web/app.py.bak_full_ui:16:    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+src/web/app.py.bak_full_ui:18:templates = Jinja2Templates(directory=TEMPLATES_DIR if os.path.exists(TEMPLATES_DIR) else BASE_DIR)
+src/web/app.py.bak_full_ui:71:@app.get("/", response_class=HTMLResponse)
+src/web/app.py.bak_full_ui:82:@app.get("/api/status")
+src/web/app.py.bak_full_ui:83:@app.get("/api/telemetry")
+src/web/app.py.bak_full_ui:107:@app.get("/api/trades")
+src/web/app.py.bak_full_ui:111:@app.post("/api/bot/start")
+src/web/app.py.bak_full_ui:117:@app.post("/api/bot/stop")
+src/web/app.py.backup_20260905_112213:8:from fastapi import FastAPI, Request, BackgroundTasks, HTTPException, Response, Cookie
+src/web/app.py.backup_20260905_112213:12:app = FastAPI(title="AtriaTrade Master Secured Cockpit", version="2.5.0")
+src/web/app.py.backup_20260905_112213:242:@app.post("/api/auth/login")
+src/web/app.py.backup_20260905_112213:283:@app.post("/api/auth/login")
+src/web/app.py.backup_20260905_112213:292:@app.get("/api/auth/check")
+src/web/app.py.backup_20260905_112213:299:@app.get("/api/status")
+src/web/app.py.backup_20260905_112213:303:@app.post("/api/bot/stop")
+src/web/app.py.backup_20260905_112213:309:@app.post("/api/bot/set_mode")
+src/web/app.py.backup_20260905_112213:317:@app.post("/api/bot/config")
+src/web/app.py.backup_20260905_112213:326:@app.post("/api/trade/market")
+src/web/app.py.backup_20260905_112213:331:@app.post("/api/trade/panic")
+src/web/app.py.backup_20260905_112213:336:@app.post("/api/wallet/deposit")
+src/web/app.py.backup_20260905_112213:341:@app.post("/api/wallet/withdraw")
+src/web/app.py.backup_20260905_112213:349:@app.get("/", response_class=HTMLResponse)
+src/web/app.py.bak_pre_fix:8:from fastapi import FastAPI, Request, BackgroundTasks, HTTPException, Response, Cookie
+src/web/app.py.bak_pre_fix:12:app = FastAPI(title="AtriaTrade Master Secured Cockpit", version="2.5.0")
+src/web/app.py.bak_pre_fix:242:@app.post("/api/auth/login")
+src/web/app.py.bak_pre_fix:283:@app.post("/api/auth/login")
+src/web/app.py.bak_pre_fix:292:@app.get("/api/auth/check")
+src/web/app.py.bak_pre_fix:299:@app.get("/api/status")
+src/web/app.py.bak_pre_fix:303:@app.post("/api/bot/stop")
+src/web/app.py.bak_pre_fix:309:@app.post("/api/bot/set_mode")
+src/web/app.py.bak_pre_fix:317:@app.post("/api/bot/config")
+src/web/app.py.bak_pre_fix:326:@app.post("/api/trade/market")
+src/web/app.py.bak_pre_fix:331:@app.post("/api/trade/panic")
+src/web/app.py.bak_pre_fix:336:@app.post("/api/wallet/deposit")
+src/web/app.py.bak_pre_fix:341:@app.post("/api/wallet/withdraw")
+src/web/app.py.bak_pre_fix:349:@app.get("/", response_class=HTMLResponse)
+src/web/app.py.bak.20260905_204900:3:FastAPI application for AtriaTrade Dashboard.
+src/web/app.py.bak.20260905_204900:4:Integrates DashboardServer for bot telemetry and control.
+src/web/app.py.bak.20260905_204900:7:from fastapi import FastAPI, HTTPException, Request, Depends
+src/web/app.py.bak.20260905_204900:11:import uvicorn
+src/web/app.py.bak.20260905_204900:57:# --- FastAPI Application Setup ---
+src/web/app.py.bak.20260905_204900:58:app = FastAPI(
+src/web/app.py.bak.20260905_204900:74:# Configure FastAPI's API Key header dependency.
+src/web/app.py.bak.20260905_204900:126:@app.get(
+src/web/app.py.bak.20260905_204900:143:@app.get(
+src/web/app.py.bak.20260905_204900:186:@app.put(
+src/web/app.py.bak.20260905_204900:252:        uvicorn.run(
+src/web/app.py.bak.20260905_205136:3:FastAPI application for AtriaTrade Dashboard.
+src/web/app.py.bak.20260905_205136:4:Integrates DashboardServer for bot telemetry and control.
+src/web/app.py.bak.20260905_205136:7:from fastapi import FastAPI, HTTPException, Request, Depends
+src/web/app.py.bak.20260905_205136:11:import uvicorn
+src/web/app.py.bak.20260905_205136:57:# --- FastAPI Application Setup ---
+src/web/app.py.bak.20260905_205136:58:app = FastAPI(
+src/web/app.py.bak.20260905_205136:74:# Configure FastAPI's API Key header dependency.
+src/web/app.py.bak.20260905_205136:126:@app.get(
+src/web/app.py.bak.20260905_205136:143:@app.get(
+src/web/app.py.bak.20260905_205136:186:@app.put(
+src/web/app.py.bak.20260905_205136:252:        uvicorn.run(
+src/web/app.py.backup_before_ui_merge_20260905_210454:3:FastAPI application for AtriaTrade Dashboard.
+src/web/app.py.backup_before_ui_merge_20260905_210454:4:Integrates DashboardServer for bot telemetry and control.
+src/web/app.py.backup_before_ui_merge_20260905_210454:7:from fastapi import FastAPI, HTTPException, Request, Depends
+src/web/app.py.backup_before_ui_merge_20260905_210454:11:import uvicorn
+src/web/app.py.backup_before_ui_merge_20260905_210454:57:# --- FastAPI Application Setup ---
+src/web/app.py.backup_before_ui_merge_20260905_210454:58:app = FastAPI(
+src/web/app.py.backup_before_ui_merge_20260905_210454:74:# Configure FastAPI's API Key header dependency.
+src/web/app.py.backup_before_ui_merge_20260905_210454:126:@app.get(
+src/web/app.py.backup_before_ui_merge_20260905_210454:143:@app.get(
+src/web/app.py.backup_before_ui_merge_20260905_210454:186:@app.put(
+src/web/app.py.backup_before_ui_merge_20260905_210454:252:        uvicorn.run(
+src/web/app.py.backup_before_ui_merge_20260905_211158:3:FastAPI application for AtriaTrade Dashboard.
+src/web/app.py.backup_before_ui_merge_20260905_211158:4:Integrates DashboardServer for bot telemetry and control.
+src/web/app.py.backup_before_ui_merge_20260905_211158:7:from fastapi import FastAPI, HTTPException, Request, Depends
+src/web/app.py.backup_before_ui_merge_20260905_211158:11:import uvicorn
+src/web/app.py.backup_before_ui_merge_20260905_211158:57:# --- FastAPI Application Setup ---
+src/web/app.py.backup_before_ui_merge_20260905_211158:58:app = FastAPI(
+src/web/app.py.backup_before_ui_merge_20260905_211158:74:# Configure FastAPI's API Key header dependency.
+src/web/app.py.backup_before_ui_merge_20260905_211158:126:@app.get(
+src/web/app.py.backup_before_ui_merge_20260905_211158:143:@app.get(
+src/web/app.py.backup_before_ui_merge_20260905_211158:186:@app.put(
+src/web/app.py.backup_before_ui_merge_20260905_211158:252:        uvicorn.run(
+run_paper_dashboard.py:4:import uvicorn
+run_paper_dashboard.py:18:    uvicorn.run(

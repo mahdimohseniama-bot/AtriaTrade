@@ -1,0 +1,1419 @@
+
+===== FILE: ./run_paper_dashboard.py =====
+     1	"""Unified runner for AtriaTrade Paper Engine & Web Dashboard."""
+     2	import sys
+     3	import os
+     4	import uvicorn
+     5	
+     6	# تنظیم مسیر روت پروژه
+     7	sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+     8	
+     9	from src.web.app import app
+    10	
+    11	def main():
+    12	    print("=" * 60)
+    13	    print("🚀 Starting AtriaTrade Pro (Paper Trading Mode)")
+    14	    print("🔒 Mode: 100% Simulated / Paper Trading (No Real Capital)")
+    15	    print("🌐 Dashboard URL: http://127.0.0.1:8080")
+    16	    print("=" * 60)
+    17	    
+    18	    uvicorn.run(
+    19	        "src.web.app:app",
+    20	        host="0.0.0.0",
+    21	        port=8080,
+    22	        reload=False,
+    23	        log_level="info"
+    24	    )
+    25	
+    26	if __name__ == "__main__":
+    27	    main()
+
+===== FILE: ./src/dashboard/api.py =====
+     1	from datetime import datetime, timezone
+     2	from typing import Dict, Any, Optional
+     3	from src.core.monitoring import SystemHealthMonitor, SystemAlertManager
+     4	
+     5	class ReadOnlyDashboardAPI:
+     6	    """
+     7	    API فقط‌خواندنی (Read-Only) جهت استخراج وضعیت زنده سیستم،
+     8	    مانیتورینگ هشدارها، پوزیشن‌ها و سلامت بات ترید.
+     9	    """
+    10	    def __init__(
+    11	        self,
+    12	        health_monitor: Optional[SystemHealthMonitor] = None,
+    13	        alert_manager: Optional[SystemAlertManager] = None,
+    14	        portfolio_manager: Optional[Any] = None
+    15	    ):
+    16	        self.health_monitor = health_monitor or SystemHealthMonitor()
+    17	        self.alert_manager = alert_manager or self.health_monitor.alert_manager
+    18	        self.portfolio_manager = portfolio_manager
+    19	
+    20	    def get_system_summary(self) -> Dict[str, Any]:
+    21	        """خلاصه وضعیت کلی سیستم شامل سلامت و هشدارها"""
+    22	        health = self.health_monitor.get_health_status()
+    23	        alerts = self.alert_manager.get_alerts()
+    24	        recent_alerts = alerts[-10:] if alerts else []
+    25	
+    26	        return {
+    27	            "timestamp": datetime.now(timezone.utc).isoformat(),
+    28	            "health": health,
+    29	            "total_alerts": len(alerts),
+    30	            "recent_alerts": recent_alerts,
+    31	            "mode": "PAPER_TRADING_READ_ONLY"
+    32	        }
+    33	
+    34	    def get_portfolio_snapshot(self) -> Dict[str, Any]:
+    35	        """دریافت آخرین وضعیت پورتفولیو در صورت اتصال به PortfolioManager"""
+    36	        if self.portfolio_manager is None:
+    37	            return {
+    38	                "status": "UNAVAILABLE",
+    39	                "message": "Portfolio manager is not attached.",
+    40	                "positions": {},
+    41	                "total_balance": 0.0
+    42	            }
+    43	        
+    44	        # اگر پورتفولیو منیجر متد get_portfolio_summary داشت فراخوانی می‌کنیم
+    45	        if hasattr(self.portfolio_manager, "get_portfolio_summary"):
+    46	            return self.portfolio_manager.get_portfolio_summary()
+    47	        elif hasattr(self.portfolio_manager, "positions"):
+    48	            return {
+    49	                "status": "AVAILABLE",
+    50	                "positions": getattr(self.portfolio_manager, "positions", {}),
+    51	                "balance": getattr(self.portfolio_manager, "balance", 0.0)
+    52	            }
+    53	        
+    54	        return {"status": "UNKNOWN_INTERFACE"}
+    55	
+    56	    def get_metrics_endpoint(self) -> Dict[str, Any]:
+    57	        """اندپوینت تجمیعی جهت ارائه متریک‌ها به مانیتورینگ خارجی"""
+    58	        health = self.health_monitor.get_health_status()
+    59	        return {
+    60	            "is_alive": health.get("is_alive", False),
+    61	            "status": health.get("status", "UNKNOWN"),
+    62	            "total_ticks": health.get("total_ticks", 0),
+    63	            "error_count": health.get("error_count", 0),
+    64	            "alert_count": len(self.alert_manager.get_alerts())
+    65	        }
+
+===== FILE: ./src/dashboard/auth.py =====
+     1	import secrets
+     2	import time
+     3	from typing import Dict, Optional, Tuple
+     4	
+     5	
+     6	class SecureAuthManager:
+     7	    """
+     8	    مدیریت توکن‌های امن، کنترل دسترسی، تاریخ انقضا و جلوگیری از حملات Brute-force
+     9	    """
+    10	    def __init__(self, token_ttl_hours: float = 24.0, max_failed_attempts: int = 5, lockout_minutes: float = 15.0):
+    11	        self.token_ttl_seconds = token_ttl_hours * 3600.0
+    12	        self.max_failed_attempts = max_failed_attempts
+    13	        self.lockout_seconds = lockout_minutes * 60.0
+    14	        
+    15	        # ذخیره توکن‌ها: {token: {"username": ..., "role": ..., "created_at": ...}}
+    16	        self._tokens: Dict[str, dict] = {}
+    17	        # ثبت تلاش‌های ناموفق: {ip: {"count": ..., "last_failed": ..., "locked_until": ...}}
+    18	        self._failed_attempts: Dict[str, dict] = {}
+    19	
+    20	    def generate_token_for_user(self, username: str, role: str = "read_only") -> str:
+    21	        """تولید یک توکن تصادفی با آنتروپی بالا و ثبت آن"""
+    22	        token = secrets.token_urlsafe(32)
+    23	        self._tokens[token] = {
+    24	            "username": username,
+    25	            "role": role,
+    26	            "created_at": time.time()
+    27	        }
+    28	        return token
+    29	
+    30	    def generate_token(self, username: str, role: str = "read_only") -> str:
+    31	        """متد کمکی/مستعار برای تولید توکن"""
+    32	        return self.generate_token_for_user(username, role)
+    33	
+    34	    def is_locked_out(self, client_ip: Optional[str]) -> bool:
+    35	        """بررسی قفل بودن آی‌پی به دلیل تلاش‌های ناموفق مکرر"""
+    36	        if not client_ip or client_ip not in self._failed_attempts:
+    37	            return False
+    38	        
+    39	        record = self._failed_attempts[client_ip]
+    40	        if time.time() < record.get("locked_until", 0):
+    41	            return True
+    42	        return False
+    43	
+    44	    def record_failed_attempt(self, client_ip: Optional[str]):
+    45	        """ثبت تلاش ناموفق لاگین و قفل کردن IP در صورت عبور از سقف مجاز"""
+    46	        if not client_ip:
+    47	            return
+    48	        
+    49	        now = time.time()
+    50	        if client_ip not in self._failed_attempts:
+    51	            self._failed_attempts[client_ip] = {"count": 1, "last_failed": now, "locked_until": 0}
+    52	        else:
+    53	            record = self._failed_attempts[client_ip]
+    54	            if now > record.get("locked_until", 0) and (now - record.get("last_failed", 0)) > self.lockout_seconds:
+    55	                record["count"] = 1
+    56	            else:
+    57	                record["count"] += 1
+    58	            
+    59	            record["last_failed"] = now
+    60	            if record["count"] >= self.max_failed_attempts:
+    61	                record["locked_until"] = now + self.lockout_seconds
+    62	
+    63	    def authenticate_token(self, token: str, client_ip: Optional[str] = None) -> Tuple[bool, Optional[str], Optional[str]]:
+    64	        """
+    65	        اعتبارسنجی توکن بر اساس مقایسه مقاوم به حمله زمانی (Constant Time)، بررسی انقضا و وضعیت IP
+    66	        """
+    67	        if client_ip and self.is_locked_out(client_ip):
+    68	            return False, None, None
+    69	
+    70	        matched_token_data = None
+    71	        for active_token, data in list(self._tokens.items()):
+    72	            if secrets.compare_digest(active_token, token):
+    73	                matched_token_data = data
+    74	                break
+    75	
+    76	        if not matched_token_data:
+    77	            if client_ip:
+    78	                self.record_failed_attempt(client_ip)
+    79	            return False, None, None
+    80	
+    81	        # بررسی انقضا
+    82	        if (time.time() - matched_token_data["created_at"]) > self.token_ttl_seconds:
+    83	            return False, None, None
+    84	
+    85	        # پاک کردن تلاش ناموفق در صورت لاگین موفق
+    86	        if client_ip and client_ip in self._failed_attempts:
+    87	            del self._failed_attempts[client_ip]
+    88	
+    89	        return True, matched_token_data["username"], matched_token_data["role"]
+    90	
+    91	    def authenticate(self, token: str, client_ip: Optional[str] = None) -> Tuple[bool, Optional[str], Optional[str]]:
+    92	        """متد مستعار جهت سازگاری کامل با DashboardServer"""
+    93	        return self.authenticate_token(token, client_ip)
+    94	
+    95	    def revoke_token(self, token: str) -> bool:
+    96	        """ابطال صریح توکن"""
+    97	        for active_token in list(self._tokens.keys()):
+    98	            if secrets.compare_digest(active_token, token):
+    99	                del self._tokens[active_token]
+   100	                return True
+   101	        return False
+
+===== FILE: ./src/dashboard/server.py =====
+     1	"""
+     2	Dashboard Server with Integrated Secure Auth.
+     3	Provides secure endpoints for bot telemetry, status, and control.
+     4	"""
+     5	from typing import Dict, Any, Optional
+     6	from src.dashboard.auth import SecureAuthManager
+     7	
+     8	class DashboardServer:
+     9	    def __init__(self, auth_manager: Optional[SecureAuthManager] = None):
+    10	        self.auth_manager = auth_manager or SecureAuthManager()
+    11	        self.state_data: Dict[str, Any] = {
+    12	            "status": "RUNNING",
+    13	            "mode": "PAPER_TRADING",
+    14	            "active_positions": 0,
+    15	            "total_balance_usdt": 10000.0,
+    16	            "profit_reserved": 0.0
+    17	        }
+    18	
+    19	    def get_public_status(self) -> Dict[str, Any]:
+    20	        """مسیر عمومی بدون نیاز به احراز هویت"""
+    21	        return {"system": "AtriaTrade", "online": True}
+    22	
+    23	    def get_dashboard_summary(self, token: str, client_ip: str = "127.0.0.1") -> Dict[str, Any]:
+    24	        """مسیر خصوصی و امن برای دیدن جزئیات حساب و بات"""
+    25	        is_valid, username, role = self.auth_manager.authenticate(token, client_ip=client_ip)
+    26	        
+    27	        if not is_valid:
+    28	            return {
+    29	                "success": False,
+    30	                "error": "Unauthorized: Invalid or expired token, or rate limit exceeded."
+    31	            }
+    32	        
+    33	        return {
+    34	            "success": True,
+    35	            "user": username,
+    36	            "role": role,
+    37	            "data": self.state_data
+    38	        }
+    39	
+    40	    def update_bot_state(self, key: str, value: Any, token: str, client_ip: str = "127.0.0.1") -> Dict[str, Any]:
+    41	        """تغییر وضعیت یا کانفیگ فقط برای کاربرهای ادمین"""
+    42	        is_valid, username, role = self.auth_manager.authenticate(token, client_ip=client_ip)
+    43	        
+    44	        if not is_valid:
+    45	            return {"success": False, "error": "Unauthorized"}
+    46	            
+    47	        if role != "admin":
+    48	            return {"success": False, "error": "Forbidden: Admin privileges required"}
+    49	            
+    50	        self.state_data[key] = value
+    51	        return {"success": True, "updated_key": key, "new_value": value}
+
+===== FILE: ./src/web/__init__.py =====
+
+===== FILE: ./src/web/app.py =====
+     1	# -*- coding: utf-8 -*-
+     2	"""
+     3	AtriaTrade Web App
+     4	- Serves the dashboard UI
+     5	- Keeps current backend APIs
+     6	- Paper-trading safe only
+     7	"""
+     8	
+     9	from __future__ import annotations
+    10	
+    11	import os
+    12	import time
+    13	from typing import Any, Optional
+    14	
+    15	import uvicorn
+    16	from fastapi import Depends, FastAPI, HTTPException, Request
+    17	from fastapi.responses import HTMLResponse
+    18	from fastapi.security import APIKeyHeader
+    19	from fastapi.staticfiles import StaticFiles
+    20	from fastapi.templating import Jinja2Templates
+    21	from pydantic import BaseModel, Field
+    22	
+    23	# ---------------------------------------------------------------------
+    24	# Project imports
+    25	# ---------------------------------------------------------------------
+    26	try:
+    27	    from src.dashboard.server import DashboardServer
+    28	    from src.dashboard.auth import SecureAuthManager
+    29	except ImportError as e:
+    30	    print(f"❌ ImportError: Could not import dashboard components. {e}")
+    31	    print("   Please ensure:")
+    32	    print("   1. You are running this script from the root directory of AtriaTrade (~/AtriaTrade).")
+    33	    print("   2. The directory structure includes src/dashboard/server.py and src/dashboard/auth.py.")
+    34	    raise
+    35	
+    36	# ---------------------------------------------------------------------
+    37	# Configuration
+    38	# ---------------------------------------------------------------------
+    39	AUTH_TOKEN_HEADER_NAME = "X-Auth-Token"
+    40	ADMIN_TOKEN_FOR_TEST = "SET_YOUR_ADMIN_TOKEN_HERE"  # replace with a real token if needed
+    41	
+    42	WEB_DIR = os.path.dirname(os.path.abspath(__file__))
+    43	TEMPLATES_DIR = os.path.join(WEB_DIR, "templates")
+    44	STATIC_DIR = os.path.join(WEB_DIR, "static")
+    45	
+    46	# ---------------------------------------------------------------------
+    47	# Auth / dashboard backend
+    48	# ---------------------------------------------------------------------
+    49	auth_manager = SecureAuthManager()
+    50	dashboard_server = DashboardServer(auth_manager=auth_manager)
+    51	
+    52	# ---------------------------------------------------------------------
+    53	# FastAPI app
+    54	# ---------------------------------------------------------------------
+    55	app = FastAPI(
+    56	    title="AtriaTrade Dashboard API",
+    57	    description="API for managing and monitoring the AtriaTrade bot. Paper-trading safe.",
+    58	    version="1.2.0",
+    59	)
+    60	
+    61	api_key_header = APIKeyHeader(name=AUTH_TOKEN_HEADER_NAME, auto_error=True)
+    62	
+    63	templates = Jinja2Templates(directory=TEMPLATES_DIR)
+    64	
+    65	if os.path.isdir(STATIC_DIR):
+    66	    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+    67	
+    68	
+    69	# ---------------------------------------------------------------------
+    70	# Helpers
+    71	# ---------------------------------------------------------------------
+    72	def get_client_ip(request: Request) -> str:
+    73	    if request.client and request.client.host:
+    74	        return request.client.host
+    75	
+    76	    forwarded_for = request.headers.get("X-Forwarded-For")
+    77	    if forwarded_for:
+    78	        return forwarded_for.split(",")[0].strip()
+    79	
+    80	    return "127.0.0.1"
+    81	
+    82	
+    83	def require_auth_token(token: str) -> None:
+    84	    if token == ADMIN_TOKEN_FOR_TEST:
+    85	        return
+    86	    # If you later generate dynamic tokens with SecureAuthManager,
+    87	    # the dashboard_server layer can validate them.
+    88	    # This fallback keeps local development simple.
+    89	    raise HTTPException(
+    90	        status_code=401,
+    91	        detail={"message": "Unauthorized. Invalid or expired token."},
+    92	    )
+    93	
+    94	
+    95	# ---------------------------------------------------------------------
+    96	# Models
+    97	# ---------------------------------------------------------------------
+    98	class PublicStatusResponse(BaseModel):
+    99	    system: str = Field(..., description="System name")
+   100	    online: bool = Field(..., description="System online state")
+   101	    timestamp: float = Field(..., description="Unix time")
+   102	
+   103	
+   104	class BotStateData(BaseModel):
+   105	    status: str
+   106	    mode: str
+   107	    active_positions: int
+   108	    total_balance_usdt: float
+   109	    profit_reserved: float
+   110	
+   111	
+   112	class DashboardSummaryResponse(BaseModel):
+   113	    success: bool
+   114	    user: Optional[str] = None
+   115	    role: Optional[str] = None
+   116	    data: Optional[BotStateData] = None
+   117	    error: Optional[str] = None
+   118	
+   119	
+   120	class UpdateBotStateResponse(BaseModel):
+   121	    success: bool
+   122	    updated_key: Optional[str] = None
+   123	    new_value: Optional[Any] = None
+   124	    error: Optional[str] = None
+   125	
+   126	
+   127	# ---------------------------------------------------------------------
+   128	# UI routes
+   129	# ---------------------------------------------------------------------
+   130	@app.get("/", response_class=HTMLResponse)
+   131	async def root(request: Request):
+   132	    return templates.TemplateResponse(
+   133	        "dashboard.html",
+   134	        {"request": request, "page_title": "AtriaTrade Dashboard"},
+   135	    )
+   136	
+   137	
+   138	@app.get("/dashboard", response_class=HTMLResponse)
+   139	async def dashboard_page(request: Request):
+   140	    return templates.TemplateResponse(
+   141	        "dashboard.html",
+   142	        {"request": request, "page_title": "AtriaTrade Dashboard"},
+   143	    )
+   144	
+   145	
+   146	# ---------------------------------------------------------------------
+   147	# API routes
+   148	# ---------------------------------------------------------------------
+   149	@app.get(
+   150	    "/api/public/status",
+   151	    response_model=PublicStatusResponse,
+   152	    summary="Get Public System Status",
+   153	    tags=["Public Endpoints"],
+   154	)
+   155	async def get_public_status_endpoint(request: Request):
+   156	    return PublicStatusResponse(
+   157	        system="AtriaTrade API",
+   158	        online=True,
+   159	        timestamp=time.time(),
+   160	    )
+   161	
+   162	
+   163	@app.get(
+   164	    "/api/dashboard/summary",
+   165	    response_model=DashboardSummaryResponse,
+   166	    summary="Get Authenticated Dashboard Summary",
+   167	    tags=["Dashboard API"],
+   168	    dependencies=[Depends(api_key_header)],
+   169	)
+   170	async def get_dashboard_summary_endpoint(
+   171	    request: Request,
+   172	    token: str = Depends(api_key_header),
+   173	):
+   174	    client_ip = get_client_ip(request)
+   175	
+   176	    if token != ADMIN_TOKEN_FOR_TEST:
+   177	        # Try backend validation if a real token system is available
+   178	        result = await dashboard_server.get_dashboard_summary(
+   179	            token=token,
+   180	            client_ip=client_ip,
+   181	        )
+   182	        if not result.get("success", False):
+   183	            raise HTTPException(
+   184	                status_code=401,
+   185	                detail={"message": result.get("error", "Authentication failed.")},
+   186	            )
+   187	
+   188	        bot_data = None
+   189	        if result.get("data"):
+   190	            try:
+   191	                bot_data = BotStateData(**result["data"])
+   192	            except Exception as e:
+   193	                raise HTTPException(
+   194	                    status_code=500,
+   195	                    detail={"message": f"Failed to parse dashboard data: {e}"},
+   196	                )
+   197	
+   198	        return DashboardSummaryResponse(
+   199	            success=True,
+   200	            user=result.get("user"),
+   201	            role=result.get("role"),
+   202	            data=bot_data,
+   203	        )
+   204	
+   205	    # Local dev fallback
+   206	    return DashboardSummaryResponse(
+   207	        success=True,
+   208	        user="admin",
+   209	        role="admin",
+   210	        data=BotStateData(
+   211	            status="RUNNING",
+   212	            mode="PAPER_TRADING",
+   213	            active_positions=0,
+   214	            total_balance_usdt=0.0,
+   215	            profit_reserved=0.0,
+   216	        ),
+   217	    )
+   218	
+   219	
+   220	@app.put(
+   221	    "/api/bot/state",
+   222	    response_model=UpdateBotStateResponse,
+   223	    summary="Update Bot State Parameter",
+   224	    tags=["Admin Control"],
+   225	    dependencies=[Depends(api_key_header)],
+   226	)
+   227	async def update_bot_state_endpoint(
+   228	    request: Request,
+   229	    key: str,
+   230	    value: Any,
+   231	    token: str = Depends(api_key_header),
+   232	):
+   233	    if token != ADMIN_TOKEN_FOR_TEST:
+   234	        client_ip = get_client_ip(request)
+   235	        result = await dashboard_server.update_bot_state(
+   236	            key=key,
+   237	            value=value,
+   238	            token=token,
+   239	            client_ip=client_ip,
+   240	        )
+   241	        if not result.get("success", False):
+   242	            raise HTTPException(
+   243	                status_code=403,
+   244	                detail={"message": result.get("error", "Unknown error during state update.")},
+   245	            )
+   246	        return UpdateBotStateResponse(
+   247	            success=True,
+   248	            updated_key=result.get("updated_key"),
+   249	            new_value=result.get("new_value"),
+   250	        )
+   251	
+   252	    # Safe local fallback: do not change live trading state
+   253	    return UpdateBotStateResponse(
+   254	        success=True,
+   255	        updated_key=key,
+   256	        new_value=value,
+   257	    )
+   258	
+   259	
+   260	# ---------------------------------------------------------------------
+   261	# Run server
+   262	# ---------------------------------------------------------------------
+   263	if __name__ == "__main__":
+   264	    HOST = "127.0.0.1"
+   265	    PORT = 8080
+   266	
+   267	    print("\n" + "=" * 60)
+   268	    print("🚀 Starting AtriaTrade Dashboard API Server...")
+   269	    print(f"   Host: {HOST}")
+   270	    print(f"   Port: {PORT}")
+   271	    print(f"   Docs: http://{HOST}:{PORT}/docs")
+   272	    print(f"   ReDoc: http://{HOST}:{PORT}/redoc")
+   273	    print("=" * 60 + "\n")
+   274	
+   275	    uvicorn.run(
+   276	        "src.web.app:app",
+   277	        host=HOST,
+   278	        port=PORT,
+   279	        reload=True,
+   280	    )
+
+===== FILE: ./src/web/index.html =====
+     1	<!DOCTYPE html>
+     2	<html lang="fa" dir="rtl">
+     3	<head>
+     4	    <meta charset="UTF-8">
+     5	    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+     6	    <title>AtriaTrade Pro</title>
+     7	    <style>
+     8	        * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+     9	        body { background-color: #0b0f19; color: #f3f4f6; padding: 12px; }
+    10	        .header { display: flex; justify-content: space-between; align-items: center; background: #151c2e; padding: 12px; border-radius: 12px; margin-bottom: 12px; border: 1px solid #1f293d; }
+    11	        .header h1 { font-size: 1rem; color: #38bdf8; font-weight: bold; }
+    12	        .header-btns { display: flex; gap: 8px; }
+    13	        .btn { border: none; border-radius: 8px; font-size: 0.8rem; font-weight: 600; cursor: pointer; padding: 8px 12px; transition: 0.2s; }
+    14	        .btn:active { transform: scale(0.96); }
+    15	        .btn-panic { background: #ef4444; color: white; }
+    16	        .btn-auto-on { background: #10b981; color: white; }
+    17	        .btn-auto-off { background: #4b5563; color: white; }
+    18	        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+    19	        .card { background: #151c2e; border: 1px solid #1f293d; border-radius: 12px; padding: 12px; }
+    20	        .card-title { font-size: 0.75rem; color: #9ca3af; margin-bottom: 4px; }
+    21	        .card-value { font-size: 1.1rem; font-weight: bold; }
+    22	        .chart-box { background: #151c2e; border: 1px solid #1f293d; border-radius: 12px; padding: 8px; margin-bottom: 12px; height: 160px; }
+    23	        canvas { width: 100%; height: 100%; }
+    24	        .pos-card { background: #151c2e; border: 1px solid #1f293d; border-radius: 12px; padding: 12px; margin-bottom: 12px; }
+    25	        .action-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+    26	        .btn-buy { background: #10b981; color: white; padding: 12px; font-size: 0.85rem; }
+    27	        .btn-sell { background: #ef4444; color: white; padding: 12px; font-size: 0.85rem; }
+    28	        .btn-close { background: #f59e0b; color: #111827; grid-column: span 2; padding: 12px; font-weight: bold; font-size: 0.9rem; margin-top: 6px; }
+    29	        .table-card { background: #151c2e; border: 1px solid #1f293d; border-radius: 12px; padding: 12px; margin-bottom: 12px; }
+    30	        table { width: 100%; border-collapse: collapse; font-size: 0.75rem; text-align: right; }
+    31	        th, td { padding: 6px 4px; border-bottom: 1px solid #1f293d; }
+    32	        th { color: #9ca3af; }
+    33	        .logs-card { background: #070a10; border: 1px solid #1f293d; border-radius: 12px; padding: 10px; font-family: monospace; font-size: 0.75rem; color: #10b981; height: 110px; overflow-y: auto; }
+    34	        .badge { padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 0.7rem; }
+    35	        .badge-buy { background: #064e3b; color: #34d399; }
+    36	        .badge-sell { background: #7f1d1d; color: #f87171; }
+    37	    </style>
+    38	</head>
+    39	<body>
+    40	    <div class="header">
+    41	        <h1><span>⚡</span> ATRATRADE PRO</h1>
+    42	        <div class="header-btns">
+    43	            <button class="btn btn-panic" onclick="callApi('/api/panic')">PANIC</button>
+    44	            <button id="btnAuto" class="btn btn-auto-on" onclick="callApi('/api/autopilot/toggle')">اتوپایلوت: فعال</button>
+    45	        </div>
+    46	    </div>
+    47	
+    48	    <div class="grid">
+    49	        <div class="card">
+    50	            <div class="card-title">قیمت BTC/USDT</div>
+    51	            <div class="card-value" id="priceDisplay" style="color:#10b981;">---</div>
+    52	        </div>
+    53	        <div class="card">
+    54	            <div class="card-title">کل سرمایه (Equity)</div>
+    55	            <div class="card-value" id="equityDisplay" style="color:#38bdf8;">$10,000.00</div>
+    56	        </div>
+    57	        <div class="card">
+    58	            <div class="card-title">صندوق امن سود (Safe Vault)</div>
+    59	            <div class="card-value" id="vaultDisplay" style="color:#facc15;">$0.00</div>
+    60	        </div>
+    61	        <div class="card">
+    62	            <div class="card-title">RSI (14) / روند</div>
+    63	            <div class="card-value" id="rsiDisplay">-- / --</div>
+    64	        </div>
+    65	    </div>
+    66	
+    67	    <div class="chart-box">
+    68	        <canvas id="simpleChart"></canvas>
+    69	    </div>
+    70	
+    71	    <div class="pos-card">
+    72	        <div style="display:flex; justify-content:space-between; align-items:center;">
+    73	            <strong>پوزیشن فعال:</strong>
+    74	            <span id="posStatus" style="color:#9ca3af;">بدون معامله باز</span>
+    75	        </div>
+    76	        <div id="posDetails" style="font-size:0.85rem; color:#d1d5db; display:none; margin-top:8px; border-top:1px dashed #374151; padding-top:8px;">
+    77	            <div style="display:flex; justify-content:space-between;">
+    78	                <span>قیمت ورود: <b id="posEntry">$0</b></span>
+    79	                <span>حجم: <b>0.02 BTC</b></span>
+    80	            </div>
+    81	            <div style="margin-top:6px; font-weight:bold; font-size:1rem; display:flex; justify-content:space-between;">
+    82	                <span>سود/زیان لحظه‌ای:</span>
+    83	                <span id="posPnL">$0.00 (0.0%)</span>
+    84	            </div>
+    85	        </div>
+    86	    </div>
+    87	
+    88	    <div class="action-grid">
+    89	        <button class="btn btn-buy" onclick="sendOrder('BUY')">📈 خرید دستی (0.02 BTC)</button>
+    90	        <button class="btn btn-sell" onclick="sendOrder('SELL')">📉 فروش دستی (0.02 BTC)</button>
+    91	        <button class="btn btn-close" id="btnClosePos" style="display:none;" onclick="callApi('/api/order/close')">⚡ بستن پوزیشن و تسویه سود</button>
+    92	    </div>
+    93	
+    94	    <div class="table-card">
+    95	        <div style="display:flex; justify-content:space-between; margin-bottom:8px; font-size:0.85rem; font-weight:bold; color:#38bdf8;">
+    96	            <span>📑 تاریخچه معاملات (SQLite)</span>
+    97	            <a href="/api/export/csv" style="color:#38bdf8; text-decoration:none;">📥 دانلود CSV</a>
+    98	        </div>
+    99	        <table>
+   100	            <thead>
+   101	                <tr>
+   102	                    <th>زمان</th>
+   103	                    <th>نوع</th>
+   104	                    <th>ورود</th>
+   105	                    <th>خروج</th>
+   106	                    <th>سود/زیان</th>
+   107	                </tr>
+   108	            </thead>
+   109	            <tbody id="tradeTableBody">
+   110	                <tr><td colspan="5" style="text-align:center; color:#6b7280;">هنوز معامله ای ثبت نشده است</td></tr>
+   111	            </tbody>
+   112	        </table>
+   113	    </div>
+   114	
+   115	    <div class="logs-card" id="logBox">در حال بارگذاری لاگ‌ها...</div>
+   116	
+   117	    <script>
+   118	        function drawChart(prices) {
+   119	            const canvas = document.getElementById("simpleChart");
+   120	            if (!canvas || !prices || prices.length < 2) return;
+   121	            const w = canvas.width = canvas.parentElement.clientWidth;
+   122	            const h = canvas.height = canvas.parentElement.clientHeight;
+   123	            const ctx = canvas.getContext("2d");
+   124	            ctx.clearRect(0, 0, w, h);
+   125	
+   126	            const min = Math.min(...prices);
+   127	            const max = Math.max(...prices);
+   128	            const range = (max - min) || 1;
+   129	
+   130	            ctx.strokeStyle = "#10b981";
+   131	            ctx.lineWidth = 2.5;
+   132	            ctx.beginPath();
+   133	            prices.forEach((p, i) => {
+   134	                const x = (i / (prices.length - 1)) * (w - 30) + 15;
+   135	                const y = h - 20 - ((p - min) / range) * (h - 40);
+   136	                if (i === 0) ctx.moveTo(x, y);
+   137	                else ctx.lineTo(x, y);
+   138	            });
+   139	            ctx.stroke();
+   140	
+   141	            ctx.fillStyle = "#9ca3af";
+   142	            ctx.font = "10px sans-serif";
+   143	            ctx.fillText("Max: $" + max.toFixed(0), 10, 14);
+   144	            ctx.fillText("Min: $" + min.toFixed(0), 10, h - 5);
+   145	        }
+   146	
+   147	        async function updateData() {
+   148	            try {
+   149	                const res = await fetch("/api/telemetry?t=" + Date.now());
+   150	                if (!res.ok) return;
+   151	                const d = await res.json();
+   152	
+   153	                document.getElementById("priceDisplay").innerText = "$" + Number(d.current_price).toLocaleString();
+   154	                document.getElementById("equityDisplay").innerText = "$" + Number(d.equity).toLocaleString(undefined, {minimumFractionDigits:2});
+   155	                document.getElementById("vaultDisplay").innerText = "$" + Number(d.safe_profit).toLocaleString(undefined, {minimumFractionDigits:2});
+   156	                document.getElementById("rsiDisplay").innerText = d.rsi + " / " + d.trend;
+   157	
+   158	                const btnAuto = document.getElementById("btnAuto");
+   159	                btnAuto.className = d.autopilot ? "btn btn-auto-on" : "btn btn-auto-off";
+   160	                btnAuto.innerText = d.autopilot ? "اتوپایلوت: فعال" : "اتوپایلوت: غیرفعال";
+   161	
+   162	                drawChart(d.price_history);
+   163	
+   164	                const pos = d.active_position;
+   165	                const posDetails = document.getElementById("posDetails");
+   166	                const posStatus = document.getElementById("posStatus");
+   167	                const btnClose = document.getElementById("btnClosePos");
+   168	                
+   169	                if (pos) {
+   170	                    posStatus.innerHTML = '<span class="badge ' + (pos.side === 'BUY' ? 'badge-buy' : 'badge-sell') + '">' + pos.side + '</span>';
+   171	                    document.getElementById("posEntry").innerText = "$" + Number(pos.entry_price).toLocaleString();
+   172	                    const pnlEl = document.getElementById("posPnL");
+   173	                    pnlEl.innerText = (pos.pnl >= 0 ? "+" : "") + "$" + pos.pnl + " (" + (pos.pnl_pct >= 0 ? "+" : "") + pos.pnl_pct + "%)";
+   174	                    pnlEl.style.color = pos.pnl >= 0 ? "#34d399" : "#f87171";
+   175	                    posDetails.style.display = "block";
+   176	                    btnClose.style.display = "block";
+   177	                } else {
+   178	                    posStatus.innerText = "بدون معامله باز";
+   179	                    posDetails.style.display = "none";
+   180	                    btnClose.style.display = "none";
+   181	                }
+   182	
+   183	                if (d.recent_trades && d.recent_trades.length > 0) {
+   184	                    document.getElementById("tradeTableBody").innerHTML = d.recent_trades.map(t => 
+   185	                        `<tr><td>${t.time_str}</td><td><span class="badge ${t.side === 'BUY' ? 'badge-buy' : 'badge-sell'}">${t.side}</span></td><td>$${Number(t.entry_price).toLocaleString()}</td><td>$${Number(t.exit_price).toLocaleString()}</td><td style="color:${t.pnl>=0?'#34d399':'#f87171'};font-weight:bold;">${t.pnl>=0?'+':''}$${t.pnl}</td></tr>`
+   186	                    ).join("");
+   187	                }
+   188	
+   189	                if (d.logs && d.logs.length > 0) {
+   190	                    const logBox = document.getElementById("logBox");
+   191	                    logBox.innerHTML = d.logs.join("<br>");
+   192	                    logBox.scrollTop = logBox.scrollHeight;
+   193	                }
+   194	            } catch (e) {
+   195	                console.error(e);
+   196	            }
+   197	        }
+   198	
+   199	        async function sendOrder(side) {
+   200	            await fetch("/api/order/manual", {
+   201	                method: "POST",
+   202	                headers: { "Content-Type": "application/json" },
+   203	                body: JSON.stringify({ side: side, amount: 0.02 })
+   204	            });
+   205	            updateData();
+   206	        }
+   207	
+   208	        async function callApi(url) {
+   209	            await fetch(url, { method: "POST" });
+   210	            updateData();
+   211	        }
+   212	
+   213	        setInterval(updateData, 1500);
+   214	        updateData();
+   215	    </script>
+   216	</body>
+   217	</html>
+
+===== FILE: ./src/web/main.py =====
+     1	import os
+     2	from pathlib import Path
+     3	from fastapi import FastAPI, Request
+     4	from fastapi.responses import HTMLResponse
+     5	from fastapi.staticfiles import StaticFiles
+     6	from fastapi.templating import Jinja2Templates
+     7	from fastapi.middleware.cors import CORSMiddleware
+     8	
+     9	# مسیردهی پویا برای Termux
+    10	WEB_DIR = Path(__file__).resolve().parent
+    11	TEMPLATES_DIR = WEB_DIR / "templates"
+    12	STATIC_DIR = WEB_DIR / "static"
+    13	
+    14	app = FastAPI(title="AtriaTrade Dashboard")
+    15	
+    16	app.add_middleware(
+    17	    CORSMiddleware,
+    18	    allow_origins=["*"],
+    19	    allow_credentials=True,
+    20	    allow_methods=["*"],
+    21	    allow_headers=["*"],
+    22	)
+    23	
+    24	# mount static files
+    25	app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+    26	templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+    27	
+    28	@app.get("/", response_class=HTMLResponse)
+    29	async def dashboard(request: Request):
+    30	    return templates.TemplateResponse("index.html", {"request": request, "status": "Paper Mode (Safe)"})
+    31	
+    32	@app.get("/health")
+    33	async def health_check():
+    34	    return {"status": "ok", "mode": "Paper Trading", "security": "No Real API Keys"}
+
+===== FILE: ./src/web/server.py =====
+     1	import secrets
+     2	from fastapi import FastAPI, Request, Form, Depends, HTTPException, status
+     3	from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+     4	from fastapi.staticfiles import StaticFiles
+     5	from fastapi.templating import Jinja2Templates
+     6	import uvicorn
+     7	import os
+     8	
+     9	app = FastAPI(title="AtriaTrade Web Console")
+    10	
+    11	# مدیریت توکن‌های سشن ساده
+    12	ACTIVE_SESSIONS = set()
+    13	ADMIN_PASSWORD = "mehdi1234"
+    14	
+    15	# تعریف مسیر تمپلیت‌ها
+    16	current_dir = os.path.dirname(os.path.abspath(__file__))
+    17	templates = Jinja2Templates(directory=os.path.join(current_dir, "templates"))
+    18	
+    19	# وضعیت ماک سیستم برای تست اولیه
+    20	bot_status = {
+    21	    "is_running": False,
+    22	    "active_strategy": "SMC + Momentum Engine",
+    23	    "market": "BTC/USDT",
+    24	    "balance_usdt": 1000.0,
+    25	    "profit_reserve": 0.0,
+    26	    "current_pnl": 0.0,
+    27	    "trade_mode": "Paper Trading (Sandbox)",
+    28	    "logs": [
+    29	        "[SYSTEM] Security layer initialized.",
+    30	        "[AUTH] Console locked. Awaiting admin session."
+    31	    ]
+    32	}
+    33	
+    34	def check_auth(request: Request):
+    35	    session_token = request.cookies.get("session_token")
+    36	    if not session_token or session_token not in ACTIVE_SESSIONS:
+    37	        raise HTTPException(
+    38	            status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+    39	            headers={"Location": "/login"}
+    40	        )
+    41	    return True
+    42	
+    43	@app.get("/login", response_class=HTMLResponse)
+    44	async def login_page(request: Request):
+    45	    return templates.TemplateResponse("login.html", {"request": request, "error": None})
+    46	
+    47	@app.post("/login", response_class=HTMLResponse)
+    48	async def handle_login(request: Request, password: str = Form(...)):
+    49	    if password == ADMIN_PASSWORD:
+    50	        token = secrets.token_hex(16)
+    51	        ACTIVE_SESSIONS.add(token)
+    52	        bot_status["logs"].append("[AUTH] Admin successfully authenticated.")
+    53	        response = RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
+    54	        response.set_cookie(key="session_token", value=token, httponly=True)
+    55	        return response
+    56	    else:
+    57	        return templates.TemplateResponse("login.html", {
+    58	            "request": request, 
+    59	            "error": "رمز عبور اشتباه است! دسترسی غیرمجاز ثبت شد."
+    60	        })
+    61	
+    62	@app.get("/logout")
+    63	async def logout(request: Request):
+    64	    session_token = request.cookies.get("session_token")
+    65	    if session_token in ACTIVE_SESSIONS:
+    66	        ACTIVE_SESSIONS.remove(session_token)
+    67	    response = RedirectResponse(url="/login")
+    68	    response.delete_cookie("session_token")
+    69	    return response
+    70	
+    71	@app.get("/", response_class=HTMLResponse)
+    72	async def dashboard(request: Request, authenticated: bool = Depends(check_auth)):
+    73	    return templates.TemplateResponse("dashboard.html", {
+    74	        "request": request,
+    75	        "status": bot_status
+    76	    })
+    77	
+    78	@app.get("/api/status")
+    79	async def get_status(authenticated: bool = Depends(check_auth)):
+    80	    return JSONResponse(content=bot_status)
+    81	
+    82	@app.post("/api/bot/start")
+    83	async def start_bot(authenticated: bool = Depends(check_auth)):
+    84	    bot_status["is_running"] = True
+    85	    bot_status["logs"].append("[ENGINE] Bot execution started by Admin.")
+    86	    return {"status": "success", "message": "ربات فعال شد"}
+    87	
+    88	@app.post("/api/bot/stop")
+    89	async def stop_bot(authenticated: bool = Depends(check_auth)):
+    90	    bot_status["is_running"] = False
+    91	    bot_status["logs"].append("[PANIC] Engine stopped immediately by Admin.")
+    92	    return {"status": "success", "message": "ربات متوقف شد"}
+    93	
+    94	if __name__ == "__main__":
+    95	    uvicorn.run(app, host="127.0.0.1", port=8080)
+
+===== FILE: ./src/web/templates/dashboard.html =====
+     1	<!DOCTYPE html>
+     2	<html lang="fa" dir="rtl">
+     3	<head>
+     4	    <meta charset="UTF-8">
+     5	    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+     6	    <title>AtriaTrade Pro Auto-Pilot</title>
+     7	    <script src="https://cdn.tailwindcss.com"></script>
+     8	    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+     9	    <style>
+    10	        body { font-family: system-ui, -apple-system, sans-serif; }
+    11	        .glass-panel {
+    12	            background: rgba(17, 24, 39, 0.85);
+    13	            backdrop-filter: blur(8px);
+    14	            border: 1px solid rgba(255, 255, 255, 0.1);
+    15	        }
+    16	    </style>
+    17	</head>
+    18	<body class="bg-gray-950 text-gray-100 min-h-screen p-3 sm:p-5 flex flex-col gap-4">
+    19	
+    20	    <!-- Header & Quick Controls -->
+    21	    <header class="flex justify-between items-center bg-gray-900 border border-gray-800 p-3 rounded-2xl shadow-lg">
+    22	        <div class="flex items-center gap-2">
+    23	            <span class="inline-block w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></span>
+    24	            <h1 class="text-sm sm:text-base font-bold tracking-wide">ATRIATRADE AUTO-PILOT</h1>
+    25	        </div>
+    26	        <div class="flex items-center gap-2">
+    27	            <button id="auto-btn" onclick="triggerAction('toggle_auto')" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-emerald-600 text-white hover:bg-emerald-500 transition">اتوپایلوت: فعال</button>
+    28	            <button onclick="triggerAction('panic')" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-rose-600 text-white hover:bg-rose-500 transition">PANIC 🚨</button>
+    29	        </div>
+    30	    </header>
+    31	
+    32	    <!-- Metrics Grid -->
+    33	    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+    34	        <div class="glass-panel p-3.5 rounded-2xl border-cyan-500/30">
+    35	            <div class="text-[11px] text-gray-400 font-medium">قیمت BTC/USDT</div>
+    36	            <div id="btc-price" class="text-base sm:text-lg font-black text-cyan-400 mt-1">$0.00</div>
+    37	        </div>
+    38	        <div class="glass-panel p-3.5 rounded-2xl border-blue-500/30">
+    39	            <div class="text-[11px] text-gray-400 font-medium">کل سرمایه (Equity)</div>
+    40	            <div id="total-equity" class="text-base sm:text-lg font-black text-blue-400 mt-1">$0.00</div>
+    41	        </div>
+    42	        <div class="glass-panel p-3.5 rounded-2xl border-amber-500/30">
+    43	            <div class="text-[11px] text-gray-400 font-medium">صندوق امن سود</div>
+    44	            <div id="reserve-vault" class="text-base sm:text-lg font-black text-amber-400 mt-1">$0.00</div>
+    45	        </div>
+    46	        <div class="glass-panel p-3.5 rounded-2xl border-purple-500/30">
+    47	            <div class="text-[11px] text-gray-400 font-medium">نرخ برد / سود کل</div>
+    48	            <div id="win-rate-stat" class="text-base sm:text-lg font-black text-purple-400 mt-1">0% (+$0.00)</div>
+    49	        </div>
+    50	    </div>
+    51	
+    52	    <!-- Live Chart Panel -->
+    53	    <div class="glass-panel p-3.5 rounded-2xl">
+    54	        <div class="flex justify-between items-center mb-2">
+    55	            <div class="text-xs font-bold text-gray-300">📈 نوسانات زنده قیمت BTC</div>
+    56	            <span class="text-[10px] bg-emerald-950 text-emerald-400 border border-emerald-800 px-2 py-0.5 rounded-full font-semibold">LIVE</span>
+    57	        </div>
+    58	        <div class="h-44 w-full">
+    59	            <canvas id="priceChart"></canvas>
+    60	        </div>
+    61	    </div>
+    62	
+    63	    <!-- Indicators & Active Position -->
+    64	    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+    65	        <div class="glass-panel p-3.5 rounded-2xl flex flex-col justify-between">
+    66	            <div class="text-xs font-bold text-gray-400">تحلیل تکنیکال</div>
+    67	            <div class="flex justify-between items-center mt-2">
+    68	                <span class="text-xs text-gray-300">شاخص RSI (14):</span>
+    69	                <span id="rsi-val" class="text-sm font-bold text-amber-400">--</span>
+    70	            </div>
+    71	            <div class="flex justify-between items-center mt-1">
+    72	                <span class="text-xs text-gray-300">روند استراتژی:</span>
+    73	                <span id="trend-val" class="text-xs font-bold text-emerald-400">--</span>
+    74	            </div>
+    75	        </div>
+    76	        <div class="glass-panel p-3.5 rounded-2xl flex flex-col justify-between border-indigo-500/30">
+    77	            <div class="text-xs font-bold text-gray-400">پوزیشن فعال ربات</div>
+    78	            <div id="active-position" class="text-xs font-semibold text-gray-200 mt-2">بدون معامله باز</div>
+    79	            <div id="pos-pnl" class="text-xs font-bold mt-1 text-gray-400">PnL: $0.00</div>
+    80	        </div>
+    81	    </div>
+    82	
+    83	    <!-- Manual Trade Buttons -->
+    84	    <div class="grid grid-cols-2 gap-3">
+    85	        <button onclick="triggerAction('buy')" class="w-full py-2.5 rounded-xl bg-emerald-600/90 hover:bg-emerald-500 font-bold text-xs text-white transition flex items-center justify-center gap-1">
+    86	            ↑ خرید دستی 0.02 BTC
+    87	        </button>
+    88	        <button onclick="triggerAction('sell')" class="w-full py-2.5 rounded-xl bg-rose-600/90 hover:bg-rose-500 font-bold text-xs text-white transition flex items-center justify-center gap-1">
+    89	            ↓ فروش دستی 0.02 BTC
+    90	        </button>
+    91	    </div>
+    92	
+    93	    <!-- Recent Trades & System Logs -->
+    94	    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+    95	        <div class="glass-panel p-3 rounded-2xl">
+    96	            <div class="text-xs font-bold text-gray-400 mb-2">📜 تاریخچه معاملات بسته شده</div>
+    97	            <div id="trades-container" class="text-[11px] space-y-1.5 max-h-32 overflow-y-auto text-gray-300">
+    98	                <p class="text-gray-500">هنوز معامله‌ای ثبت نشده است.</p>
+    99	            </div>
+   100	        </div>
+   101	        <div class="glass-panel p-3 rounded-2xl">
+   102	            <div class="text-xs font-bold text-gray-400 mb-2">⚡️ رویدادهای زنده سیستم</div>
+   103	            <div id="logs-container" class="font-mono text-[10px] space-y-1 max-h-32 overflow-y-auto text-emerald-400/90">
+   104	                <p>در انتظار لاگ...</p>
+   105	            </div>
+   106	        </div>
+   107	    </div>
+   108	
+   109	    <script>
+   110	        const ctx = document.getElementById('priceChart').getContext('2d');
+   111	        const priceChart = new Chart(ctx, {
+   112	            type: 'line',
+   113	            data: {
+   114	                labels: Array(25).fill(''),
+   115	                datasets: [{
+   116	                    label: 'BTC/USDT',
+   117	                    data: Array(25).fill(63400),
+   118	                    borderColor: '#10b981',
+   119	                    borderWidth: 2,
+   120	                    tension: 0.35,
+   121	                    pointRadius: 1,
+   122	                    fill: true,
+   123	                    backgroundColor: 'rgba(16, 185, 129, 0.08)'
+   124	                }]
+   125	            },
+   126	            options: {
+   127	                responsive: true,
+   128	                maintainAspectRatio: false,
+   129	                plugins: { legend: { display: false } },
+   130	                scales: {
+   131	                    x: { display: false },
+   132	                    y: { 
+   133	                        grid: { color: 'rgba(255, 255, 255, 0.05)' },
+   134	                        ticks: { color: '#6b7280', font: { size: 9 } }
+   135	                    }
+   136	                }
+   137	            }
+   138	        });
+   139	
+   140	        async function fetchTelemetry() {
+   141	            try {
+   142	                const res = await fetch('/api/telemetry');
+   143	                const data = await res.json();
+   144	                
+   145	                document.getElementById('btc-price').innerText = '$' + data.btc_price;
+   146	                document.getElementById('total-equity').innerText = '$' + data.total_equity;
+   147	                document.getElementById('reserve-vault').innerText = '$' + data.reserve_usdt;
+   148	                document.getElementById('win-rate-stat').innerText = `${data.win_rate} (${data.total_profit_usdt})`;
+   149	                
+   150	                document.getElementById('rsi-val').innerText = data.rsi;
+   151	                document.getElementById('trend-val').innerText = data.trend;
+   152	
+   153	                const pos = data.position;
+   154	                if (pos.side !== 'FLAT') {
+   155	                    document.getElementById('active-position').innerText = `${pos.side} (${pos.amount} BTC @ ${pos.entry_price})`;
+   156	                    const pnlVal = parseFloat(pos.pnl);
+   157	                    const pnlElem = document.getElementById('pos-pnl');
+   158	                    pnlElem.innerText = `PnL: ${pnlVal >= 0 ? '+' : ''}${pnlVal.toFixed(2)} USDT [TP: ${pos.tp} | SL: ${pos.sl}]`;
+   159	                    pnlElem.className = `text-xs font-bold mt-1 ${pnlVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`;
+   160	                } else {
+   161	                    document.getElementById('active-position').innerText = 'بدون معامله باز (در حال تحلیل)';
+   162	                    document.getElementById('pos-pnl').innerText = 'PnL: $0.00';
+   163	                    document.getElementById('pos-pnl').className = 'text-xs font-bold mt-1 text-gray-500';
+   164	                }
+   165	
+   166	                // Update Chart
+   167	                const currPrice = parseFloat(data.btc_price.replace(/,/g, ''));
+   168	                priceChart.data.datasets[0].data.push(currPrice);
+   169	                priceChart.data.datasets[0].data.shift();
+   170	                priceChart.update('none');
+   171	
+   172	                // Update Trades
+   173	                const tradesContainer = document.getElementById('trades-container');
+   174	                if (data.recent_trades.length > 0) {
+   175	                    tradesContainer.innerHTML = data.recent_trades.map(t => `
+   176	                        <div class="flex justify-between border-b border-gray-800 pb-1">
+   177	                            <span>[${t.time}] ${t.action}</span>
+   178	                            <span class="${t.pnl.includes('+') ? 'text-emerald-400' : 'text-rose-400'} font-bold">${t.pnl}</span>
+   179	                        </div>
+   180	                    `).join('');
+   181	                }
+   182	
+   183	                // Update Logs
+   184	                const logsContainer = document.getElementById('logs-container');
+   185	                logsContainer.innerHTML = data.logs.slice(-15).reverse().map(l => `<div>${l}</div>`).join('');
+   186	
+   187	            } catch (err) {
+   188	                console.error("Telemetry fetch error:", err);
+   189	            }
+   190	        }
+   191	
+   192	        async function triggerAction(action) {
+   193	            await fetch('/api/action', {
+   194	                method: 'POST',
+   195	                headers: { 'Content-Type': 'application/json' },
+   196	                body: JSON.stringify({ action: action, amount: 0.02 })
+   197	            });
+   198	            fetchTelemetry();
+   199	        }
+   200	
+   201	        setInterval(fetchTelemetry, 1800);
+   202	        fetchTelemetry();
+   203	    </script>
+   204	</body>
+   205	</html>
+
+===== FILE: ./src/web/templates/index.html =====
+     1	<!DOCTYPE html>
+     2	<html lang="fa" dir="rtl">
+     3	<head>
+     4	    <meta charset="UTF-8">
+     5	    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+     6	    <title>AtriaTrade Dashboard</title>
+     7	    <script src="https://cdn.tailwindcss.com"></script>
+     8	    <style>body { background-color: #0f172a; color: #f8fafc; font-family: Tahoma, sans-serif; }</style>
+     9	</head>
+    10	<body class="p-6">
+    11	    <div class="max-w-4xl mx-auto">
+    12	        <header class="flex justify-between items-center border-b border-gray-700 pb-4 mb-6">
+    13	            <div>
+    14	                <h1 class="text-3xl font-bold text-blue-400">AtriaTrade</h1>
+    15	                <p class="text-sm text-gray-400 mt-1">Dashboard</p>
+    16	            </div>
+    17	            <div class="bg-green-900 text-green-300 px-4 py-2 rounded-lg text-sm font-bold border border-green-700">🟢 {{ status }}</div>
+    18	        </header>
+    19	        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+    20	            <div class="bg-gray-800 p-5 rounded-xl border border-gray-700">
+    21	                <h2 class="text-xl mb-3 border-b border-gray-600 pb-2">وضعیت سیستم</h2>
+    22	                <p id="health-status" class="text-gray-400">در حال اتصال...</p>
+    23	            </div>
+    24	        </div>
+    25	    </div>
+    26	    <script>
+    27	        fetch('/health').then(res => res.json()).then(data => {
+    28	            document.getElementById('health-status').innerHTML = `وضعیت API: <span class="text-green-400">متصل</span><br>حالت: ${data.mode}`;
+    29	        }).catch(() => {
+    30	            document.getElementById('health-status').innerHTML = '<span class="text-red-500">خطا در ارتباط</span>';
+    31	        });
+    32	    </script>
+    33	</body>
+    34	</html>
+
+===== FILE: ./src/web/templates/login.html =====
+     1	<!DOCTYPE html>
+     2	<html lang="fa" dir="rtl">
+     3	<head>
+     4	    <meta charset="UTF-8">
+     5	    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+     6	    <title>ورود به کنسول امن AtriaTrade</title>
+     7	    <style>
+     8	        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Tahoma, sans-serif; }
+     9	        body {
+    10	            background: radial-gradient(circle at top, #131b2e 0%, #080d19 100%);
+    11	            min-height: 100vh;
+    12	            display: flex;
+    13	            align-items: center;
+    14	            justify-content: center;
+    15	            padding: 20px;
+    16	            color: #e2e8f0;
+    17	        }
+    18	        .login-card {
+    19	            background: rgba(18, 26, 45, 0.85);
+    20	            border: 1px solid rgba(59, 130, 246, 0.25);
+    21	            backdrop-filter: blur(12px);
+    22	            border-radius: 16px;
+    23	            padding: 32px 24px;
+    24	            width: 100%;
+    25	            max-width: 380px;
+    26	            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6), 0 0 25px rgba(59, 130, 246, 0.15);
+    27	            text-align: center;
+    28	        }
+    29	        .icon {
+    30	            font-size: 48px;
+    31	            margin-bottom: 12px;
+    32	            display: inline-block;
+    33	            filter: drop-shadow(0 0 10px #3b82f6);
+    34	        }
+    35	        h2 { font-size: 22px; margin-bottom: 6px; color: #60a5fa; font-weight: 700; }
+    36	        p.subtitle { font-size: 13px; color: #94a3b8; margin-bottom: 24px; }
+    37	        .form-group { margin-bottom: 20px; text-align: right; }
+    38	        label { display: block; font-size: 12px; color: #cbd5e1; margin-bottom: 8px; font-weight: 600; }
+    39	        input[type="password"] {
+    40	            width: 100%;
+    41	            padding: 12px 14px;
+    42	            background: #0b1120;
+    43	            border: 1px solid #334155;
+    44	            border-radius: 10px;
+    45	            color: #f8fafc;
+    46	            font-size: 15px;
+    47	            outline: none;
+    48	            transition: all 0.2s ease;
+    49	            text-align: center;
+    50	            letter-spacing: 2px;
+    51	        }
+    52	        input[type="password"]:focus {
+    53	            border-color: #3b82f6;
+    54	            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
+    55	        }
+    56	        .btn-submit {
+    57	            width: 100%;
+    58	            padding: 13px;
+    59	            background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+    60	            color: white;
+    61	            border: none;
+    62	            border-radius: 10px;
+    63	            font-size: 15px;
+    64	            font-weight: 700;
+    65	            cursor: pointer;
+    66	            transition: transform 0.15s ease, filter 0.2s ease;
+    67	            box-shadow: 0 4px 15px rgba(37, 99, 235, 0.35);
+    68	        }
+    69	        .btn-submit:active { transform: scale(0.98); }
+    70	        .error-msg {
+    71	            background: rgba(239, 68, 68, 0.15);
+    72	            border: 1px solid rgba(239, 68, 68, 0.4);
+    73	            color: #f87171;
+    74	            padding: 10px;
+    75	            border-radius: 8px;
+    76	            font-size: 12px;
+    77	            margin-bottom: 18px;
+    78	        }
+    79	        .badge {
+    80	            display: inline-block;
+    81	            margin-top: 24px;
+    82	            padding: 4px 12px;
+    83	            background: rgba(16, 185, 129, 0.12);
+    84	            color: #34d399;
+    85	            border-radius: 20px;
+    86	            font-size: 11px;
+    87	            font-weight: 600;
+    88	            border: 1px solid rgba(16, 185, 129, 0.25);
+    89	        }
+    90	    </style>
+    91	</head>
+    92	<body>
+    93	    <div class="login-card">
+    94	        <div class="icon">🛡️</div>
+    95	        <h2>مرکز فرماندهی AtriaTrade</h2>
+    96	        <p class="subtitle">سیستم احراز هویت امنیتی</p>
+    97	
+    98	        {% if error %}
+    99	        <div class="error-msg">{{ error }}</div>
+   100	        {% endif %}
+   101	
+   102	        <form action="/login" method="post">
+   103	            <div class="form-group">
+   104	                <label for="password">رمز عبور ادمین:</label>
+   105	                <input type="password" id="password" name="password" placeholder="••••••••" required autofocus>
+   106	            </div>
+   107	            <button type="submit" class="btn-submit">ورود به پنل مانیتورینگ</button>
+   108	        </form>
+   109	
+   110	        <div class="badge">● Paper Trading Mode</div>
+   111	    </div>
+   112	</body>
+   113	</html>
+
+===== FILE: ./tests/test_dashboard_api.py =====
+     1	import pytest
+     2	from src.dashboard.api import ReadOnlyDashboardAPI
+     3	from src.core.monitoring import SystemHealthMonitor, SystemAlertManager, AlertLevel
+     4	
+     5	class MockPortfolioManager:
+     6	    def __init__(self):
+     7	        self.balance = 10000.0
+     8	        self.positions = {"BTCUSDT": {"amount": 0.5, "entry_price": 50000.0}}
+     9	
+    10	    def get_portfolio_summary(self):
+    11	        return {
+    12	            "status": "HEALTHY",
+    13	            "total_equity": 10000.0,
+    14	            "open_positions": 1,
+    15	            "positions": self.positions
+    16	        }
+    17	
+    18	def test_dashboard_api_initialization():
+    19	    api = ReadOnlyDashboardAPI()
+    20	    summary = api.get_system_summary()
+    21	    assert "health" in summary
+    22	    assert summary["health"]["status"] == "HEALTHY"
+    23	    assert summary["mode"] == "PAPER_TRADING_READ_ONLY"
+    24	
+    25	def test_dashboard_api_with_alerts():
+    26	    alert_mgr = SystemAlertManager()
+    27	    alert_mgr.trigger_alert(AlertLevel.WARNING, "High Latency", "Network lag detected")
+    28	    monitor = SystemHealthMonitor(alert_manager=alert_mgr)
+    29	    
+    30	    api = ReadOnlyDashboardAPI(health_monitor=monitor, alert_manager=alert_mgr)
+    31	    summary = api.get_system_summary()
+    32	    
+    33	    assert summary["total_alerts"] == 1
+    34	    assert len(summary["recent_alerts"]) == 1
+    35	    assert summary["recent_alerts"][0]["title"] == "High Latency"
+    36	
+    37	def test_dashboard_api_portfolio_snapshot_mock():
+    38	    mock_pm = MockPortfolioManager()
+    39	    api = ReadOnlyDashboardAPI(portfolio_manager=mock_pm)
+    40	    snapshot = api.get_portfolio_snapshot()
+    41	    
+    42	    assert snapshot["status"] == "HEALTHY"
+    43	    assert snapshot["total_equity"] == 10000.0
+    44	    assert "BTCUSDT" in snapshot["positions"]
+    45	
+    46	def test_dashboard_api_portfolio_snapshot_none():
+    47	    api = ReadOnlyDashboardAPI(portfolio_manager=None)
+    48	    snapshot = api.get_portfolio_snapshot()
+    49	    assert snapshot["status"] == "UNAVAILABLE"
+    50	
+    51	def test_dashboard_api_metrics_endpoint():
+    52	    monitor = SystemHealthMonitor()
+    53	    monitor.record_tick()
+    54	    monitor.record_tick()
+    55	    monitor.record_error("Sample error")
+    56	    
+    57	    api = ReadOnlyDashboardAPI(health_monitor=monitor)
+    58	    metrics = api.get_metrics_endpoint()
+    59	    
+    60	    assert metrics["is_alive"] is True
+    61	    assert metrics["total_ticks"] == 2
+    62	    assert metrics["error_count"] == 1
+    63	    assert metrics["alert_count"] == 1
+
+===== FILE: ./tests/test_dashboard_auth.py =====
+     1	import pytest
+     2	from src.dashboard.auth import SecureAuthManager
+     3	
+     4	
+     5	def test_token_generation_and_authentication():
+     6	    auth = SecureAuthManager(token_ttl_hours=1)
+     7	    token = auth.generate_token_for_user(username="mehdi_admin", role="admin")
+     8	
+     9	    assert isinstance(token, str)
+    10	    assert len(token) > 20
+    11	
+    12	    is_valid, user, role = auth.authenticate_token(token, client_ip="192.168.1.100")
+    13	    assert is_valid is True
+    14	    assert user == "mehdi_admin"
+    15	    assert role == "admin"
+    16	
+    17	
+    18	def test_invalid_token_fails():
+    19	    auth = SecureAuthManager()
+    20	    auth.generate_token_for_user(username="viewer", role="read_only")
+    21	
+    22	    is_valid, user, role = auth.authenticate_token("wrong_invalid_token_12345", client_ip="192.168.1.50")
+    23	    assert is_valid is False
+    24	    assert user is None
+    25	    assert role is None
+    26	
+    27	
+    28	def test_rate_limiting_and_lockout():
+    29	    auth = SecureAuthManager(max_failed_attempts=3, lockout_minutes=5)
+    30	    ip = "10.0.0.99"
+    31	
+    32	    for _ in range(3):
+    33	        auth.authenticate_token("wrong_token", client_ip=ip)
+    34	
+    35	    assert auth.is_locked_out(ip) is True
+    36	
+    37	    valid_token = auth.generate_token_for_user("user1", "read_only")
+    38	    is_valid, _, _ = auth.authenticate_token(valid_token, client_ip=ip)
+    39	    assert is_valid is False
+    40	
+    41	
+    42	def test_token_expiration():
+    43	    auth = SecureAuthManager(token_ttl_hours=-1)
+    44	    token = auth.generate_token_for_user("expired_user", "read_only")
+    45	
+    46	    is_valid, user, role = auth.authenticate_token(token)
+    47	    assert is_valid is False
+    48	    assert user is None
+    49	
+    50	
+    51	def test_token_revocation():
+    52	    auth = SecureAuthManager()
+    53	    token = auth.generate_token_for_user("revokable_user", "admin")
+    54	
+    55	    is_valid, _, _ = auth.authenticate_token(token)
+    56	    assert is_valid is True
+    57	
+    58	    revoked = auth.revoke_token(token)
+    59	    assert revoked is True
+    60	
+    61	    is_valid, _, _ = auth.authenticate_token(token)
+    62	    assert is_valid is False
+
+===== FILE: ./tests/test_dashboard_server.py =====
+     1	import pytest
+     2	from src.dashboard.auth import SecureAuthManager
+     3	from src.dashboard.server import DashboardServer
+     4	
+     5	def test_public_endpoint():
+     6	    server = DashboardServer()
+     7	    res = server.get_public_status()
+     8	    assert res["online"] is True
+     9	    assert res["system"] == "AtriaTrade"
+    10	
+    11	def test_protected_dashboard_summary():
+    12	    auth = SecureAuthManager()
+    13	    server = DashboardServer(auth_manager=auth)
+    14	    
+    15	    # بدون توکن معتبر
+    16	    res = server.get_dashboard_summary("fake_token")
+    17	    assert res["success"] is False
+    18	    assert "Unauthorized" in res["error"]
+    19	    
+    20	    # با توکن معتبر
+    21	    valid_token = auth.generate_token("mehdi", "read_only")
+    22	    res_ok = server.get_dashboard_summary(valid_token)
+    23	    assert res_ok["success"] is True
+    24	    assert res_ok["user"] == "mehdi"
+    25	    assert res_ok["data"]["mode"] == "PAPER_TRADING"
+    26	
+    27	def test_role_based_access_control():
+    28	    auth = SecureAuthManager()
+    29	    server = DashboardServer(auth_manager=auth)
+    30	    
+    31	    read_only_token = auth.generate_token("viewer", "read_only")
+    32	    admin_token = auth.generate_token("admin_user", "admin")
+    33	    
+    34	    # کاربر معمولی نباید بتواند استیت را عوض کند
+    35	    res_forbidden = server.update_bot_state("mode", "LIVE", read_only_token)
+    36	    assert res_forbidden["success"] is False
+    37	    assert "Forbidden" in res_forbidden["error"]
+    38	    
+    39	    # کاربر ادمین باید بتواند
+    40	    res_admin = server.update_bot_state("active_positions", 2, admin_token)
+    41	    assert res_admin["success"] is True
+    42	    assert server.state_data["active_positions"] == 2

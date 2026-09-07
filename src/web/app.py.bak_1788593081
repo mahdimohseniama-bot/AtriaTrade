@@ -1,0 +1,260 @@
+import os
+import random
+import asyncio
+from datetime import datetime
+from typing import Optional, List, Dict, Any
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
+
+# Safe Imports
+try:
+    from src.core.portfolio_manager import PortfolioManager
+except ImportError:
+    PortfolioManager = None
+
+try:
+    from src.core.profit_reserve import ProfitReserveManager
+except ImportError:
+    try:
+        from src.core.profit_reserve_manager import ProfitReserveManager
+    except ImportError:
+        ProfitReserveManager = None
+
+app = FastAPI(title="AtriaTrade Paper Trading Engine", version="1.0.0")
+
+initial_balance = 10000.0
+
+if PortfolioManager:
+    try:
+        portfolio_mgr = PortfolioManager(initial_balance=initial_balance)
+    except TypeError:
+        portfolio_mgr = PortfolioManager(initial_cash=initial_balance)
+else:
+    class MockPortfolioManager:
+        def __init__(self, initial_cash=10000.0):
+            self.cash = initial_cash
+            self.positions = {}
+        def get_balance(self):
+            return self.cash
+        def get_summary(self):
+            return {"equity": self.cash, "total_profit": 0.0}
+    portfolio_mgr = MockPortfolioManager(initial_cash=initial_balance)
+
+if ProfitReserveManager:
+    try:
+        profit_reserve_mgr = ProfitReserveManager(portfolio=portfolio_mgr)
+    except Exception:
+        profit_reserve_mgr = ProfitReserveManager()
+else:
+    class MockProfitReserveManager:
+        def __init__(self):
+            self.total_reserved = 0.0
+        def get_vault_balance(self):
+            return self.total_reserved
+        def get_total_reserved(self):
+            return self.total_reserved
+    profit_reserve_mgr = MockProfitReserveManager()
+
+current_simulated_price = 65461.55
+price_history: List[float] = [65400.0, 65420.0, 65410.0, 65450.0, 65461.55]
+system_logs: List[str] = ["سامانه AtriaTrade در حالت Paper Trading فعال است."]
+recent_trades: List[Dict[str, Any]] = [
+    {"time": datetime.now().strftime("%H:%M:%S"), "type": "BUY", "side": "BUY", "entry": 65200.0, "entry_price": 65200.0, "exit": 65350.0, "exit_price": 65350.0, "price": 65350.0, "amount": 0.02, "pnl": 3.0},
+    {"time": datetime.now().strftime("%H:%M:%S"), "type": "BUY", "side": "BUY", "entry": 65150.0, "entry_price": 65150.0, "exit": 65300.0, "exit_price": 65300.0, "price": 65300.0, "amount": 0.02, "pnl": 3.0},
+    {"time": datetime.now().strftime("%H:%M:%S"), "type": "SELL", "side": "SELL", "entry": 65500.0, "entry_price": 65500.0, "exit": 65400.0, "exit_price": 65400.0, "price": 65400.0, "amount": 0.02, "pnl": 2.0}
+]
+is_autopilot_active = False
+
+class ManualOrderRequest(BaseModel):
+    side: str
+    symbol: str = "BTCUSDT"
+    amount: float = 0.02
+
+async def market_simulation_loop():
+    global current_simulated_price, price_history
+    while True:
+        await asyncio.sleep(2)
+        change_pct = random.uniform(-0.0015, 0.0015)
+        current_simulated_price = max(100.0, current_simulated_price * (1.0 + change_pct))
+        price_history.append(round(current_simulated_price, 2))
+        if len(price_history) > 50:
+            price_history.pop(0)
+
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(market_simulation_loop())
+
+@app.get("/", response_class=HTMLResponse)
+async def serve_dashboard():
+    index_path = os.path.join(os.path.dirname(__file__), "index.html")
+    if os.path.exists(index_path):
+        with open(index_path, "r", encoding="utf-8") as f:
+            return f.read()
+    return "<h1>AtriaTrade Dashboard Index Not Found</h1>"
+
+def build_telemetry_payload():
+    summary = portfolio_mgr.get_summary() if hasattr(portfolio_mgr, "get_summary") else {}
+    current_balance = portfolio_mgr.get_balance() if hasattr(portfolio_mgr, "get_balance") else initial_balance
+
+    reserved = 0.0
+    if hasattr(profit_reserve_mgr, "get_vault_balance"):
+        reserved = profit_reserve_mgr.get_vault_balance()
+    elif hasattr(profit_reserve_mgr, "get_total_reserved"):
+        reserved = profit_reserve_mgr.get_total_reserved()
+    elif hasattr(profit_reserve_mgr, "total_reserved"):
+        reserved = profit_reserve_mgr.total_reserved
+
+    positions_list = []
+    active_pos_dict = None
+
+    if hasattr(portfolio_mgr, "positions") and portfolio_mgr.positions:
+        for sym, pos in portfolio_mgr.positions.items():
+            p_data = pos if isinstance(pos, dict) else getattr(pos, "__dict__", {})
+            positions_list.append(p_data)
+            if not active_pos_dict:
+                entry = float(p_data.get("entry_price", current_simulated_price))
+                side = str(p_data.get("side", "BUY")).upper()
+                size = float(p_data.get("quantity", p_data.get("amount", 0.02)))
+                
+                pnl = (current_simulated_price - entry) * size if side == "BUY" else (entry - current_simulated_price) * size
+                pnl_pct = (pnl / (entry * size)) * 100 if (entry * size) > 0 else 0.0
+
+                active_pos_dict = {
+                    "symbol": sym,
+                    "side": side,
+                    "entry_price": round(entry, 2),
+                    "current_price": round(current_simulated_price, 2),
+                    "size": round(size, 4),
+                    "amount": round(size, 4),
+                    "pnl": round(pnl, 2),
+                    "pnl_pct": round(pnl_pct, 2)
+                }
+
+    return {
+        "status": "online",
+        "mode": "PAPER_TRADING",
+        "autopilot": is_autopilot_active,
+        # کلیه نام‌های احتمالی برای قیمت
+        "price": round(current_simulated_price, 2),
+        "btc_price": round(current_simulated_price, 2),
+        "current_price": round(current_simulated_price, 2),
+        "last_price": round(current_simulated_price, 2),
+        "price_history": price_history,
+        "prices": price_history,
+        "rsi": 54.2,
+        "trend": "NEUTRAL",
+        "balance": round(current_balance, 2),
+        "equity": round(summary.get("equity", current_balance), 2),
+        "total_profit": round(summary.get("total_profit", 0.0), 2),
+        # کلیه نام‌های احتمالی برای صندوق سود
+        "reserve_profit": round(reserved, 2),
+        "safe_vault": round(reserved, 2),
+        "vault_balance": round(reserved, 2),
+        "vault": round(reserved, 2),
+        "positions": positions_list,
+        "active_position": active_pos_dict,
+        "logs": system_logs[-20:],
+        "recent_trades": recent_trades[-10:],
+        "trades": recent_trades[-10:],
+        "history": recent_trades[-10:]
+    }
+
+@app.get("/api/telemetry")
+async def get_telemetry():
+    return build_telemetry_payload()
+
+@app.get("/api/status")
+async def get_status():
+    return build_telemetry_payload()
+
+@app.post("/api/toggle_autopilot")
+async def toggle_autopilot():
+    global is_autopilot_active
+    is_autopilot_active = not is_autopilot_active
+    status_str = "فعال" if is_autopilot_active else "غیرفعال"
+    system_logs.append(f"وضعیت اتوپایلوت تغییر یافت: {status_str}")
+    return {"status": "ok", "autopilot": is_autopilot_active}
+
+@app.post("/api/order/manual")
+async def place_manual_order(req: ManualOrderRequest):
+    global recent_trades
+    side_upper = req.side.upper()
+    symbol = req.symbol or "BTCUSDT"
+    qty = req.amount or 0.02
+    price = current_simulated_price
+
+    try:
+        pos_data = {
+            "symbol": symbol,
+            "side": side_upper,
+            "entry_price": price,
+            "quantity": qty,
+            "amount": qty
+        }
+        
+        if hasattr(portfolio_mgr, "positions"):
+            portfolio_mgr.positions[symbol] = pos_data
+
+        trade_item = {
+            "time": datetime.now().strftime("%H:%M:%S"),
+            "type": side_upper,
+            "side": side_upper,
+            "entry": round(price, 2),
+            "entry_price": round(price, 2),
+            "exit": round(price, 2),
+            "exit_price": round(price, 2),
+            "price": round(price, 2),
+            "amount": qty,
+            "pnl": 0.0
+        }
+        recent_trades.append(trade_item)
+
+        log_msg = f"سفارش دستی ثبت شد: {side_upper} مقدار {qty} در قیمت ${price:,.2f}"
+        system_logs.append(log_msg)
+        return {"status": "success", "message": log_msg, "order": pos_data}
+    except Exception as e:
+        err_msg = f"خطا در ثبت سفارش دستی: {str(e)}"
+        system_logs.append(err_msg)
+        raise HTTPException(status_code=400, detail=err_msg)
+
+@app.post("/api/order/close")
+async def close_position():
+    global recent_trades
+    if hasattr(portfolio_mgr, "positions") and "BTCUSDT" in portfolio_mgr.positions:
+        pos = portfolio_mgr.positions.pop("BTCUSDT")
+        entry = float(pos.get("entry_price", current_simulated_price))
+        qty = float(pos.get("quantity", pos.get("amount", 0.02)))
+        side = str(pos.get("side", "BUY")).upper()
+        exit_price = current_simulated_price
+        
+        pnl = (exit_price - entry) * qty if side == "BUY" else (entry - exit_price) * qty
+
+        trade_item = {
+            "time": datetime.now().strftime("%H:%M:%S"),
+            "type": f"CLOSE_{side}",
+            "side": f"CLOSE_{side}",
+            "entry": round(entry, 2),
+            "entry_price": round(entry, 2),
+            "exit": round(exit_price, 2),
+            "exit_price": round(exit_price, 2),
+            "price": round(exit_price, 2),
+            "amount": qty,
+            "pnl": round(pnl, 2)
+        }
+        recent_trades.append(trade_item)
+
+        log_msg = f"پوزیشن {side} با سود/زیان ${pnl:,.2f} بسته شد."
+        system_logs.append(log_msg)
+        return {"status": "success", "message": log_msg, "pnl": round(pnl, 2)}
+    
+    return {"status": "error", "message": "پوزیشن فعالی یافت نشد."}
+
+@app.post("/api/panic")
+async def panic_close_all():
+    global is_autopilot_active
+    is_autopilot_active = False
+    if hasattr(portfolio_mgr, "positions"):
+        portfolio_mgr.positions.clear()
+    system_logs.append("⚠️ وضعیت اضطراری (PANIC): کلیه پوزیشن‌ها بسته شدند و ربات متوقف شد.")
+    return {"status": "panic_executed"}

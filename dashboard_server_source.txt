@@ -1,0 +1,51 @@
+     1	"""
+     2	Dashboard Server with Integrated Secure Auth.
+     3	Provides secure endpoints for bot telemetry, status, and control.
+     4	"""
+     5	from typing import Dict, Any, Optional
+     6	from src.dashboard.auth import SecureAuthManager
+     7	
+     8	class DashboardServer:
+     9	    def __init__(self, auth_manager: Optional[SecureAuthManager] = None):
+    10	        self.auth_manager = auth_manager or SecureAuthManager()
+    11	        self.state_data: Dict[str, Any] = {
+    12	            "status": "RUNNING",
+    13	            "mode": "PAPER_TRADING",
+    14	            "active_positions": 0,
+    15	            "total_balance_usdt": 10000.0,
+    16	            "profit_reserved": 0.0
+    17	        }
+    18	
+    19	    def get_public_status(self) -> Dict[str, Any]:
+    20	        """مسیر عمومی بدون نیاز به احراز هویت"""
+    21	        return {"system": "AtriaTrade", "online": True}
+    22	
+    23	    def get_dashboard_summary(self, token: str, client_ip: str = "127.0.0.1") -> Dict[str, Any]:
+    24	        """مسیر خصوصی و امن برای دیدن جزئیات حساب و بات"""
+    25	        is_valid, username, role = self.auth_manager.authenticate(token, client_ip=client_ip)
+    26	        
+    27	        if not is_valid:
+    28	            return {
+    29	                "success": False,
+    30	                "error": "Unauthorized: Invalid or expired token, or rate limit exceeded."
+    31	            }
+    32	        
+    33	        return {
+    34	            "success": True,
+    35	            "user": username,
+    36	            "role": role,
+    37	            "data": self.state_data
+    38	        }
+    39	
+    40	    def update_bot_state(self, key: str, value: Any, token: str, client_ip: str = "127.0.0.1") -> Dict[str, Any]:
+    41	        """تغییر وضعیت یا کانفیگ فقط برای کاربرهای ادمین"""
+    42	        is_valid, username, role = self.auth_manager.authenticate(token, client_ip=client_ip)
+    43	        
+    44	        if not is_valid:
+    45	            return {"success": False, "error": "Unauthorized"}
+    46	            
+    47	        if role != "admin":
+    48	            return {"success": False, "error": "Forbidden: Admin privileges required"}
+    49	            
+    50	        self.state_data[key] = value
+    51	        return {"success": True, "updated_key": key, "new_value": value}
