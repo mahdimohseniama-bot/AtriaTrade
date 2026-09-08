@@ -28,8 +28,8 @@ def test_validate_normalizes_dictionary_candles():
 
     result = validator.validate(
         [
-            make_candle(timestamp=1_720_000_000_000),
-            make_candle(timestamp=1_720_000_060_000),
+            make_candle(timestamp=1_720_000_000),
+            make_candle(timestamp=1_720_000_060),
         ],
         timeframe="1m",
         require_continuity=True,
