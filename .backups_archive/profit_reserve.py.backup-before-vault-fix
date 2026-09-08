@@ -1,0 +1,51 @@
+"""
+ماژول ذخیره سود (Profit Reserve / Capital Protection)
+"""
+from typing import Dict, Any, Optional
+
+class ProfitReserveManager:
+    """
+    مدیریت و تفکیک خودکار سود برای حفظ اصل سرمایه.
+    """
+    def __init__(self, reserve_ratio: float = 0.5, portfolio: Optional[Any] = None, *args, **kwargs):
+        """
+        :param reserve_ratio: درصد ذخیره سود (مثلاً ۰.۵ برای ۵۰ درصد)
+        :param portfolio: نمونه PortfolioManager اختیاری
+        """
+        if not (0.0 <= reserve_ratio <= 1.0):
+            raise ValueError("Reserve ratio must be between 0.0 and 1.0")
+        self.reserve_ratio = float(reserve_ratio)
+        self.portfolio = portfolio
+        self.total_reserved_profit = 0.0
+        self.reserve_history = []
+
+    def calculate_reserve(self, net_profit: float) -> float:
+        """محاسبه مقدار سودی که باید ذخیره شود."""
+        if net_profit <= 0:
+            return 0.0
+        return net_profit * self.reserve_ratio
+
+    def process_trade_profit(self, profit_amount: float, trade_id: Optional[str] = None) -> Dict[str, Any]:
+        """پردازش سود معامله و ثبت ذخیره"""
+        reserve_amount = self.calculate_reserve(profit_amount)
+        if reserve_amount > 0:
+            self.total_reserved_profit += reserve_amount
+            self.reserve_history.append({
+                "trade_id": trade_id,
+                "profit": profit_amount,
+                "reserved": reserve_amount,
+                "total_reserved": self.total_reserved_profit
+            })
+        return {
+            "reserved_amount": reserve_amount,
+            "reinvest_amount": profit_amount - reserve_amount,
+            "total_reserved": self.total_reserved_profit
+        }
+
+    def get_summary(self) -> Dict[str, Any]:
+        """خلاصه وضعیت ذخیره سود"""
+        return {
+            "reserve_ratio": self.reserve_ratio,
+            "total_reserved_profit": self.total_reserved_profit,
+            "total_records": len(self.reserve_history)
+        }

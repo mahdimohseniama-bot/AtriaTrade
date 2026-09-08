@@ -1,0 +1,15 @@
+./run_paper_dashboard.py
+./src/dashboard/api.py
+./src/dashboard/auth.py
+./src/dashboard/server.py
+./src/web/__init__.py
+./src/web/app.py
+./src/web/index.html
+./src/web/main.py
+./src/web/server.py
+./src/web/templates/dashboard.html
+./src/web/templates/index.html
+./src/web/templates/login.html
+./tests/test_dashboard_api.py
+./tests/test_dashboard_auth.py
+./tests/test_dashboard_server.py

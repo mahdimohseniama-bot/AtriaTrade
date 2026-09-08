@@ -1,0 +1,282 @@
+from __future__ import annotations
+
+import shutil
+from datetime import datetime, timezone
+from pathlib import Path
+
+from .paper_session import PaperSession
+
+
+class SessionManager:
+    """
+    مدیریت نشست‌های Paper Trading.
+
+    مسئولیت‌ها:
+    - ساخت نشست جدید
+    - ذخیره نشست
+    - فهرست نشست‌ها
+    - بارگذاری نشست
+    - حذف نشست
+
+    این کلاس فقط برای Paper Trading است و هیچ معامله واقعی انجام نمی‌دهد.
+    """
+
+    def __init__(
+        self,
+        data_dir: str | Path = "data/paper_trades",
+    ) -> None:
+        self.data_dir = Path(data_dir)
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+
+    def _generate_session_name(self) -> str:
+        """
+        تولید نام یکتای نشست.
+        """
+        timestamp = datetime.now(timezone.utc).strftime(
+            "%Y%m%d_%H%M%S_%f"
+        )
+        return f"paper_{timestamp}"
+
+    def _session_file(self, session_name: str | Path) -> Path:
+        """
+        تبدیل نام نشست به مسیر فایل JSON.
+        """
+        name = Path(str(session_name)).name
+
+        if not name.endswith(".json"):
+            name = f"{name}.json"
+
+        return self.data_dir / name
+
+    def list_sessions(self) -> list[Path]:
+        """
+        فهرست نشست‌ها از جدیدترین به قدیمی‌ترین.
+        """
+        files = [
+            file_path
+            for file_path in self.data_dir.glob("*.json")
+            if file_path.is_file()
+        ]
+
+        return sorted(
+            files,
+            key=lambda file_path: file_path.stat().st_mtime,
+            reverse=True,
+        )
+
+    def create_new_session(
+        self,
+        initial_capital: float = 10_000.0,
+    ) -> PaperSession:
+        """
+        ساخت و ذخیره نشست جدید.
+        """
+        if not isinstance(initial_capital, (int, float)):
+            raise TypeError(
+                "initial_capital باید عدد باشد."
+            )
+
+        if initial_capital <= 0:
+            raise ValueError(
+                "initial_capital باید بزرگ‌تر از صفر باشد."
+            )
+
+        session_name = self._generate_session_name()
+
+        session = PaperSession(
+            session_name=session_name,
+            initial_capital=float(initial_capital),
+        )
+
+        self._save_session(session)
+
+        return session
+
+    def _find_recent_json_file(
+        self,
+        session_name: str,
+    ) -> Path | None:
+        """
+        پیدا کردن فایل نشست ذخیره‌شده توسط PaperSession.
+
+        بعضی نسخه‌های PaperSession مسیر ذخیره را خودشان تعیین می‌کنند.
+        این متد فایل JSON مربوط به نشست جدید را در مسیرهای رایج پیدا می‌کند.
+        """
+        project_root = Path.cwd()
+
+        search_directories = [
+            self.data_dir,
+            project_root / "data" / "paper_trades",
+            project_root / "data",
+        ]
+
+        possible_files: list[Path] = []
+
+        for directory in search_directories:
+            if not directory.exists():
+                continue
+
+            for file_path in directory.rglob("*.json"):
+                if file_path.is_file():
+                    if session_name in file_path.name:
+                        possible_files.append(file_path)
+
+        if not possible_files:
+            return None
+
+        return max(
+            possible_files,
+            key=lambda file_path: file_path.stat().st_mtime,
+        )
+
+    def _save_session(self, session: PaperSession) -> Path:
+        """
+        ذخیره نشست و اطمینان از قرارگرفتن فایل در data_dir.
+        """
+        save_method = getattr(session, "save_session", None)
+
+        if not callable(save_method):
+            raise AttributeError(
+                "PaperSession متد save_session ندارد."
+            )
+
+        session_name = getattr(session, "session_name", None)
+
+        if not session_name:
+            raise AttributeError(
+                "PaperSession فاقد session_name است."
+            )
+
+        target_file = self._session_file(session_name)
+
+        before_files = {
+            path.resolve()
+            for path in Path.cwd().rglob("*.json")
+            if path.is_file()
+        }
+
+        result = save_method()
+
+        if target_file.exists():
+            return target_file
+
+        if isinstance(result, (str, Path)):
+            result_file = Path(result)
+
+            if result_file.exists() and result_file.is_file():
+                if result_file.resolve() != target_file.resolve():
+                    shutil.copy2(result_file, target_file)
+                return target_file
+
+        found_file = self._find_recent_json_file(session_name)
+
+        if found_file is not None:
+            if found_file.resolve() != target_file.resolve():
+                shutil.copy2(found_file, target_file)
+            return target_file
+
+        after_files = {
+            path.resolve()
+            for path in Path.cwd().rglob("*.json")
+            if path.is_file()
+        }
+
+        new_files = after_files - before_files
+
+        matching_new_files = [
+            path
+            for path in new_files
+            if session_name in path.name
+        ]
+
+        if matching_new_files:
+            source_file = max(
+                matching_new_files,
+                key=lambda path: path.stat().st_mtime,
+            )
+            shutil.copy2(source_file, target_file)
+            return target_file
+
+        raise FileNotFoundError(
+            "PaperSession ذخیره شد، اما فایل JSON نشست پیدا نشد."
+        )
+
+    def load_session(
+        self,
+        session_name: str | Path,
+    ) -> PaperSession:
+        """
+        بارگذاری نشست با نام، نام فایل یا مسیر کامل.
+        """
+        requested_path = Path(str(session_name))
+
+        if requested_path.exists() and requested_path.is_file():
+            session_file = requested_path
+        else:
+            session_file = self._session_file(session_name)
+
+        if not session_file.exists():
+            raise FileNotFoundError(
+                f"فایل نشست پیدا نشد: {session_file}"
+            )
+
+        load_method = getattr(PaperSession, "load_session", None)
+
+        if not callable(load_method):
+            raise AttributeError(
+                "PaperSession متد load_session ندارد."
+            )
+
+        try:
+            loaded_session = load_method(str(session_file))
+        except (TypeError, ValueError, FileNotFoundError):
+            loaded_session = load_method(session_file.stem)
+
+        if loaded_session is None:
+            raise RuntimeError(
+                f"بارگذاری نشست ناموفق بود: {session_file}"
+            )
+
+        return loaded_session
+
+    def get_latest_session(self) -> PaperSession:
+        """
+        بارگذاری جدیدترین نشست.
+        """
+        sessions = self.list_sessions()
+
+        if not sessions:
+            raise FileNotFoundError(
+                "هیچ نشست ذخیره‌شده‌ای وجود ندارد."
+            )
+
+        return self.load_session(sessions[0])
+
+    def session_count(self) -> int:
+        """
+        تعداد نشست‌های ذخیره‌شده.
+        """
+        return len(self.list_sessions())
+
+    def delete_session(
+        self,
+        session_name: str | Path,
+    ) -> bool:
+        """
+        حذف نشست.
+        """
+        requested_path = Path(str(session_name))
+
+        if requested_path.exists() and requested_path.is_file():
+            session_file = requested_path
+        else:
+            session_file = self._session_file(session_name)
+
+        if not session_file.exists():
+            return False
+
+        session_file.unlink()
+        return True
+
+    def __len__(self) -> int:
+        return self.session_count()
