@@ -1,0 +1,71 @@
+"""Tests for ProfitAllocator - Compound Growth + Cash Vault model."""
+import pytest
+from src.core.profit_allocator import ProfitAllocator, ProfitSplitConfig
+
+
+class FakePortfolio:
+"""Simple portfolio for testing - cash and vault_balance only."""
+def __init__(self, cash=1000.0):
+self.cash = cash
+self.vault_balance = 0.0
+
+
+def test_config_validation():
+with pytest.raises(ValueError):
+ProfitSplitConfig(reinvest_ratio=-5).validate()
+with pytest.raises(ValueError):
+ProfitSplitConfig(min_profit_to_split=-1).validate()
+
+
+def test_default_split_70_30():
+alloc = ProfitAllocator(reinvest_ratio=70.0)
+r = alloc.split(100.0)
+assert r["reinvest_amount"] == pytest.approx(70.0)
+assert r["vault_amount"] == pytest.approx(30.0)
+assert r["reinvest_amount"] + r["vault_amount"] == pytest.approx(100.0)
+
+
+def test_no_loss_on_odd_amounts():
+alloc = ProfitAllocator(reinvest_ratio=33.0)
+r = alloc.split(10.0)
+assert r["reinvest_amount"] + r["vault_amount"] == pytest.approx(10.0)
+
+
+def test_negative_profit_untouched():
+p = FakePortfolio(cash=500.0)
+alloc = ProfitAllocator(portfolio=p)
+r = alloc.process_trade_profit(-20.0)
+assert r["skipped"] is True
+assert p.cash == 500.0 and p.vault_balance == 0.0
+
+
+def test_process_applies_reinvest_and_vault():
+p = FakePortfolio(cash=1000.0)
+alloc = ProfitAllocator(portfolio=p, reinvest_ratio=70.0)
+r = alloc.process_trade_profit(100.0)
+assert p.cash == pytest.approx(1070.0)          # reinvest into account
+assert p.vault_balance == pytest.approx(30.0)   # remainder to vault
+assert r["action"] == "split"
+s = alloc.get_summary()
+assert s["total_profit"] == pytest.approx(100.0)
+assert s["total_reinvested"] == pytest.approx(70.0)
+assert s["total_vaulted"] == pytest.approx(30.0)
+
+
+def test_compound_growth_over_cycles():
+"""Consecutive cycles: account grows, vault accumulates."""
+p = FakePortfolio(cash=1000.0)
+alloc = ProfitAllocator(portfolio=p, reinvest_ratio=70.0)
+profits = [50.0, 75.0, 120.0]
+for pr in profits:
+alloc.process_trade_profit(pr)
+assert p.cash == pytest.approx(1000.0 + sum(profits) * 0.7)
+assert p.vault_balance == pytest.approx(sum(profits) * 0.3)
+
+
+def test_min_profit_threshold():
+alloc = ProfitAllocator(min_profit_to_split=5.0)
+r = alloc.process_trade_profit(2.0)
+assert r["skipped"] is True
+r2 = alloc.process_trade_profit(10.0)
+assert r2["skipped"] is False

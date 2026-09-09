@@ -1,0 +1,149 @@
+"""
+AtriaTrade — Profit Allocator (single source of truth for profit splitting)
+============================================================================
+مدل Compound Growth + Cash Vault:
+  - بخشی از هر سود تحقق‌یافته (realized profit) به حساب معامله برمی‌گردد
+    (Reinvest) تا سرمایه چرخه بعدی بزرگ‌تر شود.
+  - بخش دیگر به کیف پول نقد (vault_balance) واریز می‌شود؛ پول کاملاً مجزا،
+    در دسترس و نقدشونده.
+
+طراحی:
+  - یک کلاس، بدون monkeypatch، بدون وابستگی به لایه‌های compat.
+  - نسبت‌ها به درصد (0..100) و قابل تنظیم در زمان ساخت.
+  - ورودی سود باید «خالص» باشد (net of fees) — همان realized_pnl که
+    PortfolioManager.record_sell برمی‌گرداند.
+"""
+
+from dataclasses import dataclass, field
+from typing import Optional
+
+
+@dataclass
+class ProfitSplitConfig:
+    """تنظیمات تقسیم سود. نسبت‌ها درصدی هستند (0..100)."""
+    reinvest_ratio: float = 70.0   # درصد سود که به حساب معامله برمی‌گردد
+    # remainder (100 - reinvest_ratio) به کیف پول نقد می‌رود
+    min_profit_to_split: float = 0.0  # سود کمتر از این مقدار تقسیم نمی‌شود
+
+    def validate(self) -> None:
+        if not (0.0 <= self.reinvest_ratio <= 100.0):
+            raise ValueError("reinvest_ratio must be within [0, 100] percent")
+        if self.min_profit_to_split < 0.0:
+            raise ValueError("min_profit_to_split cannot be negative")
+
+
+class ProfitAllocator:
+    """
+    واحد مرکزی تقسیم سود. یک نمونه (instance) از این کلاس باید تنها
+    مرجع تصمیم‌گیری درباره سرنوشت سود باشد (تک‌منبع حقیقت).
+
+    مصرف:
+        alloc = ProfitAllocator(portfolio=portfolio_manager)
+        result = alloc.process_trade_profit(net_profit)
+        # result = {"reinvest_amount": ..., "vault_amount": ..., ...}
+    """
+
+    def __init__(
+        self,
+        portfolio=None,
+        vault_holder=None,
+        reinvest_ratio: float = 70.0,
+        min_profit_to_split: float = 0.0,
+    ):
+        self.config = ProfitSplitConfig(
+            reinvest_ratio=reinvest_ratio,
+            min_profit_to_split=min_profit_to_split,
+        )
+        self.config.validate()
+        self.portfolio = portfolio      # نمونه‌ای از PortfolioManager (اختیاری)
+        self.vault_holder = vault_holder  # شیئی که vault_balance دارد (اختیاری)
+
+        # آمار تجمعی — برای گزارش و تست
+        self.total_profit: float = 0.0
+        self.total_reinvested: float = 0.0
+        self.total_vaulted: float = 0.0
+        self.split_count: int = 0
+        self.history: list = field(default_factory=list)
+
+    # ------------------------------------------------------------------ #
+    def _get_vault_balance(self) -> float:
+        holder = self.vault_holder
+        if holder is None and self.portfolio is not None:
+            holder = self.portfolio
+        if holder is None:
+            return 0.0
+        return float(getattr(holder, "vault_balance", 0.0) or 0.0)
+
+    def _add_to_vault(self, amount: float) -> None:
+        holder = self.vault_holder
+        if holder is None and self.portfolio is not None:
+            holder = self.portfolio
+        if holder is None:
+            return
+        if hasattr(holder, "add_to_vault") and callable(holder.add_to_vault):
+            holder.add_to_vault(amount)
+        else:
+            holder.vault_balance = self._get_vault_balance() + amount
+
+    def _reinvest(self, amount: float) -> None:
+        """بازگشت سود به سرمایه معامله (کش پرتفوی)."""
+        if self.portfolio is None or amount <= 0.0:
+            return
+        self.portfolio.cash = float(self.portfolio.cash or 0.0) + amount
+
+    # ------------------------------------------------------------------ #
+    def split(self, net_profit: float) -> dict:
+        """
+        سود خالص را به دو بخش تقسیم می‌کند و فقط نتیجه محاسباتی برمی‌گرداند
+        (بدون اعمال). برای پیش‌نمایش و تست محاسباتی.
+        """
+        profit = float(net_profit)
+        if profit <= 0.0:
+            return {"profit": profit, "reinvest_amount": 0.0,
+                    "vault_amount": 0.0, "skipped": True}
+        if profit < self.config.min_profit_to_split:
+            return {"profit": profit, "reinvest_amount": 0.0,
+                    "vault_amount": 0.0, "skipped": True}
+
+        reinvest = round(profit * self.config.reinvest_ratio / 100.0, 8)
+        vault = round(profit - reinvest, 8)  # باقی‌مانده → بدون گم شدن اعشار
+        return {"profit": profit, "reinvest_amount": reinvest,
+                "vault_amount": vault, "skipped": False}
+
+    def process_trade_profit(self, net_profit: float) -> dict:
+        """
+        ورودی اصلی موتور: سود خالصِ یک معامله را می‌گیرد، تقسیم می‌کند،
+        اعمال می‌کند (reinvest → portfolio.cash ، vault → vault_balance)
+        و خلاصه‌ای از آنچه اتفاق افتاد برمی‌گرداند.
+        """
+        result = self.split(net_profit)
+        if result.get("skipped"):
+            # سود غیرمثبت یا زیر آستانه: دست نمی‌زنیم، فقط گزارش می‌دهیم
+            self.history.append({"profit": float(net_profit),
+                                 "action": "skipped"})
+            return result
+
+        reinvest_amt = result["reinvest_amount"]
+        vault_amt = result["vault_amount"]
+
+        self._reinvest(reinvest_amt)
+        self._add_to_vault(vault_amt)
+
+        self.total_profit += float(net_profit)
+        self.total_reinvested += reinvest_amt
+        self.total_vaulted += vault_amt
+        self.split_count += 1
+        result.update({"action": "split", "split_count": self.split_count})
+        self.history.append(result)
+        return result
+
+    # ------------------------------------------------------------------ #
+    def get_summary(self) -> dict:
+        return {
+            "reinvest_ratio": self.config.reinvest_ratio,
+            "total_profit": round(self.total_profit, 8),
+            "total_reinvested": round(self.total_reinvested, 8),
+            "total_vaulted": round(self.total_vaulted, 8),
+            "vault_balance": round(self._get_vault_balance(), 8),
+            "split_count": self.split_count,
+        }
