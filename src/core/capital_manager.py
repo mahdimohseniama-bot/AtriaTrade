@@ -1,96 +1,67 @@
-from typing import Dict
+"""
+Capital & Profit Management Module for AtriaTrade.
+Handles:
+- Working capital tracking
+- Vault (Profit Reserve) accumulation
+- Drawdown recovery mechanism
+- 60/40 Profit split (60% Working Capital Compound / 40% Vault)
+"""
+from typing import Dict, Any
 
 class CapitalManager:
-    """
-    سیستم جامع مدیریت سرمایه ۶۰/۴۰ (Compound / Vault)
-    سازگار کامل با ترمینال رانر Termux و متدهای نام‌گذاری گوناگون
-    """
-
-    def __init__(
-        self,
-        initial_balance: float = 1000.0,
-        reinvest_ratio: float = 0.60,
-        vault_ratio: float = 0.40,
-        **kwargs
-    ):
-        capital = kwargs.get("initial_capital", initial_balance)
-        self.initial_capital = float(capital)
-        self.initial_balance = float(capital)
-        self.current_capital = float(capital)
-        self.working_capital = float(capital)
-        
-        self.reinvest_ratio = float(kwargs.get("compound_ratio", reinvest_ratio))
-        self.vault_ratio = float(kwargs.get("save_ratio", vault_ratio))
+    def __init__(self, initial_capital: float = 100.0, compound_ratio: float = 0.60):
+        self.initial_capital = float(initial_capital)
+        self.current_capital = float(initial_capital)
         self.profit_reserve = 0.0
-        self.vault_balance = 0.0
+        self.compound_ratio = float(compound_ratio)  # 60% compound, 40% vault
 
-    # دسترسی به سرمایه کل
-    def get_total_capital(self) -> float:
-        """مجموع کل ارزش: سرمایه فعال + گاوصندوق"""
-        return self.current_capital + self.vault_balance
+    def record_trade_result(self, net_pnl: float = 0.0, **kwargs) -> Dict[str, float]:
+        """
+        Record trade result supporting both net_pnl and profit keyword arguments.
+        """
+        if "profit" in kwargs:
+            net_pnl = kwargs["profit"]
+        
+        net_pnl = float(net_pnl)
 
-    # دسترسی به سرمایه فعال در گردش (Trading / Working)
+        if net_pnl > 0:
+            shortfall = max(0.0, self.initial_capital - self.current_capital)
+            if shortfall > 0:
+                recovery = min(shortfall, net_pnl)
+                self.current_capital += recovery
+                remaining_profit = net_pnl - recovery
+            else:
+                remaining_profit = net_pnl
+
+            if remaining_profit > 0:
+                to_compound = remaining_profit * self.compound_ratio
+                to_vault = remaining_profit * (1.0 - self.compound_ratio)
+                self.current_capital += to_compound
+                self.profit_reserve += to_vault
+        elif net_pnl < 0:
+            self.current_capital -= abs(net_pnl)
+
+        return self.get_status()
+
     def get_working_capital(self) -> float:
-        """سرمایه فعال در گردش معاملاتی"""
-        return self.current_capital
+        return round(self.current_capital, 4)
+
+    def get_vault_balance(self) -> float:
+        return round(self.profit_reserve, 4)
+
+    def get_total_capital(self) -> float:
+        return round(self.current_capital + self.profit_reserve, 4)
 
     def get_current_capital(self) -> float:
-        return self.current_capital
-
-    def get_available_capital(self) -> float:
-        return self.current_capital
-
-    # دسترسی به گاوصندوق سیو سود (Vault)
-    def get_vault_balance(self) -> float:
-        """موجودی سیو سود در گاوصندوق"""
-        return self.vault_balance
-
-    def get_profit_reserve(self) -> float:
-        return self.profit_reserve
-
-    def get_initial_capital(self) -> float:
-        return self.initial_capital
-
-    def record_trade_result(self, net_pnl: float):
-        """
-        ثبت نتیجه معامله:
-        - اگر سود باشد: ابتدا جبران افت سرمایه اولیه، سپس تقسیم ۶۰٪ کامپاند و ۴۰٪ گاوصندوق
-        - اگر ضرر باشد: کسر مستقیم از سرمایه فعال در گردش
-        """
-        if net_pnl > 0:
-            shortfall = self.initial_capital - self.current_capital
-            if shortfall > 0:
-                recovery_amount = min(shortfall, net_pnl)
-                self.current_capital += recovery_amount
-                remaining_profit = net_pnl - recovery_amount
-                
-                to_compound = remaining_profit * self.reinvest_ratio
-                to_save = remaining_profit * self.vault_ratio
-                self.current_capital += to_compound
-                self.profit_reserve += to_save
-                self.vault_balance += to_save
-                print(f" [+] Recovered: ${recovery_amount:.2f} | Compound: ${to_compound:.2f} | Vault: ${to_save:.2f}")
-            else:
-                to_compound = net_pnl * self.reinvest_ratio
-                to_save = net_pnl * self.vault_ratio
-                self.current_capital += to_compound
-                self.profit_reserve += to_save
-                self.vault_balance += to_save
-                print(f" [+] Profit: ${net_pnl:.2f} -> Compound (60%): ${to_compound:.2f} | Vault (40%): ${to_save:.2f}")
-        elif net_pnl < 0:
-            loss = abs(net_pnl)
-            self.current_capital -= loss
-            print(f" [-] Loss: -${loss:.2f} deducted from active capital.")
-            
-        self.working_capital = self.current_capital
+        return self.get_working_capital()
 
     def get_status(self) -> Dict[str, float]:
-        """گزارش دیکشنری جامع وضعیت سرمایه"""
         return {
-            "initial_capital": self.initial_capital,
-            "current_capital": self.current_capital,
-            "working_capital": self.current_capital,
-            "profit_reserve": self.profit_reserve,
-            "vault_balance": self.vault_balance,
-            "total_value": self.get_total_capital(),
+            "initial_capital": round(self.initial_capital, 4),
+            "working_capital": self.get_working_capital(),
+            "vault_balance": self.get_vault_balance(),
+            "total_capital": self.get_total_capital(),
+            "current_capital": self.get_working_capital(),
+            "profit_reserve": self.get_vault_balance(),
+            "total_value": self.get_total_capital()
         }
