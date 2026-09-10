@@ -1,13 +1,16 @@
-from .models import Ticker, OrderResponse
-from .base_exchange import BaseExchangeAdapter
-from .factory import ExchangeFactory
-from .adapters.dummy_exchange import DummyExchangeAdapter
-from .adapters.binance_testnet import BinanceTestnetAdapter
-from .adapters.nobitex import NobitexAdapter
+from src.exchange.base_exchange import BaseExchangeAdapter
+from src.exchange.factory import ExchangeFactory
+from src.exchange.adapters.dummy_exchange import DummyExchangeAdapter
+from src.exchange.adapters.nobitex import NobitexAdapter
 
-# ثبت آداپتورها در Factory
+# Register built-in adapters
 ExchangeFactory.register("DUMMY", DummyExchangeAdapter)
-ExchangeFactory.register("BINANCE_TESTNET", BinanceTestnetAdapter)
 ExchangeFactory.register("NOBITEX", NobitexAdapter)
 
-__all__ = ["Ticker", "OrderResponse", "BaseExchangeAdapter", "ExchangeFactory"]
+try:
+    from src.exchange.adapters.binance_testnet import BinanceTestnetAdapter
+    ExchangeFactory.register("BINANCE", BinanceTestnetAdapter)
+except Exception:
+    pass
+
+__all__ = ["BaseExchangeAdapter", "ExchangeFactory", "NobitexAdapter", "DummyExchangeAdapter"]

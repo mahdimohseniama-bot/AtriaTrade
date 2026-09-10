@@ -1,67 +1,88 @@
-"""
-Capital & Profit Management Module for AtriaTrade.
-Handles:
-- Working capital tracking
-- Vault (Profit Reserve) accumulation
-- Drawdown recovery mechanism
-- 60/40 Profit split (60% Working Capital Compound / 40% Vault)
-"""
-from typing import Dict, Any
+from typing import Dict
+
 
 class CapitalManager:
-    def __init__(self, initial_capital: float = 100.0, compound_ratio: float = 0.60):
+    """
+    مدیریت سرمایه با تقسیم سود:
+    ۶۰ درصد برای Vault
+    ۴۰ درصد برای Compound
+    """
+
+    def __init__(
+        self,
+        initial_capital: float = 100.0,
+        vault_ratio: float = 0.60,
+        compound_ratio: float = 0.40,
+        **kwargs,
+    ):
         self.initial_capital = float(initial_capital)
         self.current_capital = float(initial_capital)
-        self.profit_reserve = 0.0
-        self.compound_ratio = float(compound_ratio)  # 60% compound, 40% vault
 
-    def record_trade_result(self, net_pnl: float = 0.0, **kwargs) -> Dict[str, float]:
-        """
-        Record trade result supporting both net_pnl and profit keyword arguments.
-        """
-        if "profit" in kwargs:
-            net_pnl = kwargs["profit"]
-        
+        self.vault_ratio = float(vault_ratio)
+        self.compound_ratio = float(compound_ratio)
+
+        if self.vault_ratio < 0 or self.compound_ratio < 0:
+            raise ValueError("Profit ratios cannot be negative")
+
+        if abs((self.vault_ratio + self.compound_ratio) - 1.0) > 1e-9:
+            raise ValueError("vault_ratio + compound_ratio must equal 1.0")
+
+        self.profit_reserve = 0.0
+
+    @property
+    def vault_balance(self) -> float:
+        return self.profit_reserve
+
+    @vault_balance.setter
+    def vault_balance(self, value: float) -> None:
+        self.profit_reserve = float(value)
+
+    def record_trade_result(self, net_pnl: float) -> Dict[str, float]:
+        return self.record_trade_pnl(net_pnl)
+
+    def record_trade_pnl(self, net_pnl: float) -> Dict[str, float]:
         net_pnl = float(net_pnl)
 
-        if net_pnl > 0:
-            shortfall = max(0.0, self.initial_capital - self.current_capital)
-            if shortfall > 0:
-                recovery = min(shortfall, net_pnl)
-                self.current_capital += recovery
-                remaining_profit = net_pnl - recovery
-            else:
-                remaining_profit = net_pnl
+        vault_share = 0.0
+        compound_share = 0.0
+        recovered_shortfall = 0.0
 
-            if remaining_profit > 0:
-                to_compound = remaining_profit * self.compound_ratio
-                to_vault = remaining_profit * (1.0 - self.compound_ratio)
-                self.current_capital += to_compound
-                self.profit_reserve += to_vault
-        elif net_pnl < 0:
-            self.current_capital -= abs(net_pnl)
+        if net_pnl < 0:
+            self.current_capital += net_pnl
 
-        return self.get_status()
+        elif net_pnl > 0:
+            shortfall = max(
+                0.0,
+                self.initial_capital - self.current_capital,
+            )
 
-    def get_working_capital(self) -> float:
-        return round(self.current_capital, 4)
+            recovered_shortfall = min(net_pnl, shortfall)
+            self.current_capital += recovered_shortfall
 
-    def get_vault_balance(self) -> float:
-        return round(self.profit_reserve, 4)
+            distributable_profit = net_pnl - recovered_shortfall
 
-    def get_total_capital(self) -> float:
-        return round(self.current_capital + self.profit_reserve, 4)
+            if distributable_profit > 0:
+                vault_share = distributable_profit * self.vault_ratio
+                compound_share = distributable_profit * self.compound_ratio
 
-    def get_current_capital(self) -> float:
-        return self.get_working_capital()
+                self.profit_reserve += vault_share
+                self.current_capital += compound_share
+
+        return {
+            "net_pnl": net_pnl,
+            "vault_share": vault_share,
+            "compound_share": compound_share,
+            "recovered_shortfall": recovered_shortfall,
+            "current_capital": self.current_capital,
+            "vault_balance": self.vault_balance,
+            "profit_reserve": self.profit_reserve,
+        }
 
     def get_status(self) -> Dict[str, float]:
         return {
-            "initial_capital": round(self.initial_capital, 4),
-            "working_capital": self.get_working_capital(),
-            "vault_balance": self.get_vault_balance(),
-            "total_capital": self.get_total_capital(),
-            "current_capital": self.get_working_capital(),
-            "profit_reserve": self.get_vault_balance(),
-            "total_value": self.get_total_capital()
+            "initial_capital": self.initial_capital,
+            "current_capital": self.current_capital,
+            "profit_reserve": self.profit_reserve,
+            "vault_balance": self.vault_balance,
+            "total_value": self.current_capital + self.profit_reserve,
         }

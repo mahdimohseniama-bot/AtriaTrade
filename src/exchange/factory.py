@@ -1,18 +1,23 @@
 from typing import Dict, Type
-from .base_exchange import BaseExchangeAdapter
+from src.exchange.adapters.nobitex import NobitexAdapter
+from src.exchange.adapters.binance_testnet import BinanceTestnetAdapter
+from src.exchange.adapters.dummy_exchange import DummyExchangeAdapter
 
 class ExchangeFactory:
-    _adapters: Dict[str, Type[BaseExchangeAdapter]] = {}
+    _registry = {
+        "nobitex": NobitexAdapter,
+        "binance_testnet": BinanceTestnetAdapter,
+        "dummy": DummyExchangeAdapter
+    }
 
     @classmethod
-    def register(cls, name: str, adapter_class: Type[BaseExchangeAdapter]) -> None:
-        """ثبت یک صرافی جدید در سیستم"""
-        cls._adapters[name.upper()] = adapter_class
+    def create(cls, exchange_name: str, **kwargs):
+        key = exchange_name.lower()
+        if key not in cls._registry:
+            raise ValueError(f"Exchange '{exchange_name}' is not supported.")
+        adapter_cls = cls._registry[key]
+        return adapter_cls(**kwargs)
 
     @classmethod
-    def create(cls, name: str, **kwargs) -> BaseExchangeAdapter:
-        """ساخت و بازگرداندن نمونه‌ای از صرافی مورد نظر"""
-        name_upper = name.upper()
-        if name_upper not in cls._adapters:
-            raise ValueError(f"Exchange adapter '{name}' is not registered. Available: {list(cls._adapters.keys())}")
-        return cls._adapters[name_upper](**kwargs)
+    def register(cls, name: str, adapter_cls: Type):
+        cls._registry[name.lower()] = adapter_cls
