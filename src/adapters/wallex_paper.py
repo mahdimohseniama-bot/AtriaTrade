@@ -1,173 +1,130 @@
-"""Wallex Paper / Sandbox Exchange Adapter for AtriaTrade."""
+from __future__ import annotations
 
 import time
-import uuid
-from typing import Dict, Any, Optional
+from typing import Any, Dict, List, Optional
+
+from src.data.market_fetcher import MarketFetcher
 
 
 class WallexPaperAdapter:
     """
-    Simulated Paper Trading Adapter for Wallex Exchange.
-    Handles virtual balances, order execution simulation, fees (maker/taker),
-    and market quote conversions (TM/USDT).
+    آداپتور معاملات کاغذی (Paper Trading) متصل به دیتای زنده صرافی والکس.
+    داده‌های بازار واقعی هستند، اما بالانس و اجرای سفارشات در حافظه شبیه‌سازی می‌شوند.
     """
 
-    DEFAULT_FEES = {
-        "maker": 0.002,  # 0.2%
-        "taker": 0.0025  # 0.25%
-    }
+    def __init__(self, initial_balance_usdt: float = 100.0, fee_rate: float = 0.001):
+        self.balance_usdt = float(initial_balance_usdt)
+        self.initial_balance = float(initial_balance_usdt)
+        self.fee_rate = fee_rate
+        self.positions: Dict[str, Dict[str, Any]] = {}
+        self.order_history: List[Dict[str, Any]] = []
+        self.market_fetcher = MarketFetcher(use_paper_trading=False)
 
-    def __init__(self, initial_balances: Optional[Dict[str, float]] = None):
-        """Initialize adapter with paper trading virtual balances."""
-        self.wallets: Dict[str, float] = initial_balances or {
-            "tm": 50_000_000.0,   # 50,000,000 Tomans
-            "usdt": 1000.0,
-            "btc": 0.05,
-            "eth": 0.5
-        }
-        self.wallets = {k.lower(): float(v) for k, v in self.wallets.items()}
-        self.orders: Dict[str, Dict[str, Any]] = {}
-        self.market_prices: Dict[str, float] = {
-            "BTCTM": 6_500_000_000.0,
-            "USDTTM": 65_000.0,
-            "ETHTM": 230_000_000.0,
-            "BTCUSDT": 100_000.0,
-            "ETHUSDT": 3_500.0
-        }
+    def get_latest_price(self, symbol: str) -> float:
+        """دریافت آخرین قیمت بازار از طریق آخرین کندل ۱ دقیقه والکس."""
+        try:
+            candles = self.market_fetcher.fetch_ohlcv(
+                exchange_name="WALLEX",
+                symbol=symbol,
+                timeframe="1m",
+                limit=1,
+            )
+            if candles:
+                return float(candles[-1]["close"])
+        except Exception:
+            pass
+        return 0.0
 
-    def normalize_symbol(self, symbol: str) -> str:
-        """Standardize symbol notation (e.g. btc-tm or btctm -> BTCTM)."""
-        return symbol.upper().replace("-", "").replace("_", "").replace("/", "")
+    def get_market_candles(
+        self,
+        symbol: str,
+        timeframe: str = "15m",
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """دریافت کندل‌های تاریخی و لایو از والکس."""
+        return self.market_fetcher.fetch_ohlcv(
+            exchange_name="WALLEX",
+            symbol=symbol,
+            timeframe=timeframe,
+            limit=limit,
+        )
 
-    def set_market_price(self, symbol: str, price: float) -> None:
-        """Set simulated market price for testing."""
-        sym = self.normalize_symbol(symbol)
-        self.market_prices[sym] = float(price)
-
-    def get_ticker(self, symbol: str) -> Dict[str, Any]:
-        """Fetch simulated ticker data."""
-        sym = self.normalize_symbol(symbol)
-        price = self.market_prices.get(sym, 100.0)
-        return {
-            "symbol": sym,
-            "lastPrice": price,
-            "bidPrice": price * 0.999,
-            "askPrice": price * 1.001,
-            "timestamp": int(time.time() * 1000)
-        }
-
-    def get_order_book(self, symbol: str, limit: int = 10) -> Dict[str, Any]:
-        """Fetch simulated order book."""
-        ticker = self.get_ticker(symbol)
-        mid = ticker["lastPrice"]
-        bids = [{"price": mid * (1 - 0.001 * i), "quantity": 0.5 * (i + 1)} for i in range(1, limit + 1)]
-        asks = [{"price": mid * (1 + 0.001 * i), "quantity": 0.5 * (i + 1)} for i in range(1, limit + 1)]
-        return {
-            "symbol": ticker["symbol"],
-            "bids": bids,
-            "asks": asks,
-            "timestamp": int(time.time() * 1000)
-        }
-
-    def get_balance(self, currency: str) -> float:
-        """Get virtual balance for a specific asset."""
-        return self.wallets.get(currency.lower(), 0.0)
-
-    def get_all_balances(self) -> Dict[str, float]:
-        """Get copy of all virtual wallet balances."""
-        return self.wallets.copy()
-
-    def _split_symbol(self, symbol: str) -> tuple[str, str]:
-        """Split symbol into base and quote currencies."""
-        sym = self.normalize_symbol(symbol)
-        if sym.endswith("TM"):
-            return sym[:-2].lower(), "tm"
-        elif sym.endswith("USDT"):
-            return sym[:-4].lower(), "usdt"
-        else:
-            return sym[:3].lower(), sym[3:].lower()
-
-    def place_order(
+    def open_position(
         self,
         symbol: str,
         side: str,
-        order_type: str,
-        amount: float,
-        price: Optional[float] = None
+        amount_usdt: float,
+        leverage: int = 1,
+        stop_loss: Optional[float] = None,
+        take_profit: Optional[float] = None,
     ) -> Dict[str, Any]:
-        """Place simulated order on Wallex Paper market."""
-        sym = self.normalize_symbol(symbol)
-        side_clean = side.lower()
-        type_clean = order_type.lower()
-        amount = float(amount)
+        """باز کردن پوزیشن پیپر تریدینگ با قیمت زنده والکس."""
+        side = side.upper()
+        if side not in ["BUY", "SELL", "LONG", "SHORT"]:
+            raise ValueError(f"Invalid side: {side}")
 
-        if amount <= 0:
-            return {"status": "failed", "error": "Order amount must be greater than zero"}
+        current_price = self.get_latest_price(symbol)
+        if current_price <= 0:
+            raise RuntimeError(f"Cannot fetch valid market price for {symbol}")
 
-        base_curr, quote_curr = self._split_symbol(sym)
-        current_price = self.market_prices.get(sym, 100.0)
-        exec_price = float(price) if (type_clean == "limit" and price is not None) else current_price
+        fee = amount_usdt * self.fee_rate
+        total_cost = amount_usdt + fee
 
-        order_value = amount * exec_price
-        fee_rate = self.DEFAULT_FEES["taker"] if type_clean == "market" else self.DEFAULT_FEES["maker"]
-        order_id = f"wallex_{uuid.uuid4().hex[:10]}"
+        if total_cost > self.balance_usdt:
+            raise ValueError(f"Insufficient funds: required {total_cost:.2f}, balance {self.balance_usdt:.2f}")
 
-        if side_clean == "buy":
-            total_required = order_value * (1.0 + fee_rate)
-            available_quote = self.wallets.get(quote_curr, 0.0)
-            if available_quote < total_required:
-                return {
-                    "status": "failed",
-                    "error": f"Insufficient {quote_curr.upper()} balance. Required: {total_required:.2f}, Available: {available_quote:.2f}"
-                }
+        self.balance_usdt -= total_cost
+        position_id = f"pos_{int(time.time() * 1000)}"
 
-            fee_amount = order_value * fee_rate
-            self.wallets[quote_curr] -= total_required
-            self.wallets[base_curr] = self.wallets.get(base_curr, 0.0) + amount
-
-        elif side_clean == "sell":
-            available_base = self.wallets.get(base_curr, 0.0)
-            if available_base < amount:
-                return {
-                    "status": "failed",
-                    "error": f"Insufficient {base_curr.upper()} balance. Required: {amount}, Available: {available_base}"
-                }
-
-            fee_amount = order_value * fee_rate
-            net_proceeds = order_value - fee_amount
-            self.wallets[base_curr] -= amount
-            self.wallets[quote_curr] = self.wallets.get(quote_curr, 0.0) + net_proceeds
-
-        else:
-            return {"status": "failed", "error": f"Invalid order side: {side}"}
-
-        order_record = {
-            "clientOrderId": order_id,
-            "symbol": sym,
-            "side": side_clean,
-            "type": type_clean,
-            "origQty": amount,
-            "executedQty": amount,
-            "price": exec_price,
-            "fee": fee_amount,
-            "feeAsset": quote_curr.upper(),
-            "status": "FILLED",
-            "timestamp": int(time.time() * 1000)
+        position = {
+            "id": position_id,
+            "symbol": symbol.upper(),
+            "side": side,
+            "entry_price": current_price,
+            "amount_usdt": amount_usdt,
+            "leverage": leverage,
+            "effective_value": amount_usdt * leverage,
+            "stop_loss": stop_loss,
+            "take_profit": take_profit,
+            "open_time": time.time(),
+            "status": "OPEN",
         }
-        self.orders[order_id] = order_record
-        return {"status": "success", "result": order_record}
 
-    def cancel_order(self, client_order_id: str) -> Dict[str, Any]:
-        """Cancel an existing order."""
-        if client_order_id in self.orders:
-            if self.orders[client_order_id]["status"] == "FILLED":
-                return {"status": "failed", "error": "Cannot cancel filled order"}
-            self.orders[client_order_id]["status"] = "CANCELED"
-            return {"status": "success", "message": "Order canceled"}
-        return {"status": "failed", "error": "Order not found"}
+        self.positions[position_id] = position
+        return position
 
-    def get_order(self, client_order_id: str) -> Dict[str, Any]:
-        """Get details of an order."""
-        if client_order_id in self.orders:
-            return {"status": "success", "result": self.orders[client_order_id]}
-        return {"status": "failed", "error": "Order not found"}
+    def close_position(self, position_id: str) -> Dict[str, Any]:
+        """بستن پوزیشن بر اساس قیمت لحظه‌ای و محاسبه PnL."""
+        if position_id not in self.positions:
+            raise KeyError(f"Position {position_id} not found.")
+
+        pos = self.positions.pop(position_id)
+        current_price = self.get_latest_price(pos["symbol"])
+        if current_price <= 0:
+            current_price = pos["entry_price"]
+
+        entry = pos["entry_price"]
+        side = pos["side"]
+        lev = pos["leverage"]
+        margin = pos["amount_usdt"]
+
+        # محاسبه سود/زیان درصدی
+        if side in ["BUY", "LONG"]:
+            pnl_percent = ((current_price - entry) / entry) * lev
+        else:
+            pnl_percent = ((entry - current_price) / entry) * lev
+
+        raw_pnl = margin * pnl_percent
+        exit_fee = (margin + raw_pnl) * self.fee_rate
+        net_pnl = raw_pnl - exit_fee
+
+        returned_capital = margin + net_pnl
+        self.balance_usdt += max(0.0, returned_capital)
+
+        pos["exit_price"] = current_price
+        pos["close_time"] = time.time()
+        pos["pnl_usdt"] = net_pnl
+        pos["status"] = "CLOSED"
+
+        self.order_history.append(pos)
+        return pos
