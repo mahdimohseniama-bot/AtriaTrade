@@ -1,0 +1,137 @@
+"""Trading Engine for AtriaTrade with multi-input tick handling and risk integration."""
+from datetime import datetime
+from typing import Any, Dict, Optional
+from src.core.order_executor import Order
+import logging
+
+logger = logging.getLogger("AtriaTrade.TradingEngine")
+
+
+class TradingEngine:
+    def __init__(
+        self,
+        strategy: Any = None,
+        risk_manager: Any = None,
+        order_executor: Any = None,
+        portfolio_manager: Any = None,
+        profit_reserve: Any = None,
+        *args: Any,
+        **kwargs: Any,
+    ):
+        self.strategy = strategy or kwargs.get("strategy")
+        self.risk_manager = risk_manager or kwargs.get("risk_manager")
+        self.order_executor = order_executor or kwargs.get("order_executor")
+        self.portfolio_manager = portfolio_manager or kwargs.get("portfolio_manager")
+        self.profit_reserve = profit_reserve or kwargs.get("profit_reserve")
+
+        self.symbol = kwargs.get("symbol", "BTCUSDT")
+        self.is_running = False
+        self.trades_history = []
+
+    def start(self) -> None:
+        self.is_running = True
+
+    def stop(self) -> None:
+        self.is_running = False
+
+    def _get_balance(self, asset: str = "USDT") -> float:
+        if not self.portfolio_manager:
+            return 10000.0
+        if hasattr(self.portfolio_manager, "get_balance"):
+            return float(self.portfolio_manager.get_balance(asset))
+        if hasattr(self.portfolio_manager, "balance"):
+            bal = self.portfolio_manager.balance
+            return float(bal() if callable(bal) else bal)
+        return 10000.0
+
+    def _get_pos_qty(self, symbol: str) -> float:
+        if not self.portfolio_manager:
+            return 0.0
+        if hasattr(self.portfolio_manager, "get_position"):
+            return float(self.portfolio_manager.get_position(symbol))
+        if hasattr(self.portfolio_manager, "get_holding_quantity"):
+            return float(self.portfolio_manager.get_holding_quantity(symbol))
+        return 0.0
+
+    def process_tick(self, *args: Any, **kwargs: Any) -> Optional[Dict[str, Any]]:
+        if not self.is_running:
+            return None
+
+        current_price = None
+        signal = "HOLD"
+        symbol = self.symbol
+
+        if args:
+            first_arg = args[0]
+            if isinstance(first_arg, dict):
+                current_price = first_arg.get("price") or first_arg.get("current_price") or first_arg.get("close")
+                signal = first:
+        if not self.portfolio_manager:
+            return 10000.0
+        if hasattr(self.portfolio_manager, "get_balance"):
+            return float(self.portfolio_manager.get_balance(asset))
+        if hasattr(self.portfolio_manager, "balance"):
+            bal = self.portfolio_manager.balance
+            return float(bal() if callable(bal) else bal)
+        return 10000.0
+
+    def _get_pos_qty(self, symbol: str) -> float:
+        if not self.portfolio_manager:
+            return 0.0
+        if hasattr(self.portfolio_manager, "get_position"):
+            return float(self.portfolio_manager.get_position(symbol))
+        if hasattr(self.portfolio_manager, "get_holding_quantity"):
+            return float(self.portfolio_manager.get_holding_quantity(symbol))
+        return 0.0
+
+    def process_tick(self, *args: Any, **kwargs: Any) -> Optional[Dict[str, Any]]:
+        if not self.is_running:
+            return None
+
+        current_price = None
+        signal = "HOLD"
+        symbol = self.symbol
+
+        if args:
+            first_arg = args[0]
+            if isinstance(first_arg, dict):
+                current_price = first_arg.get("price") or first_arg.get("current_price") or first_arg.get("close")
+                signal = first_arg.get("signal", "HOLD")
+                symbol = first_arg.get("symbol", self.symbol)
+            else:
+                current_price = first_arg
+                if len(args) > 1:
+                    signal = args[1]
+
+        if current_price is None:
+            current_price = kwargs.get("current_price") or kwargs.get("price", 0.0)
+        if "signal" in kwargs:
+            append(trade_result)
+            return trade_result
+
+        elif signal == "SELL":
+            qty = position_qty if position_qty > 0 else 0.01
+
+            order = Order(
+                symbol=symbol,
+                side="SELL",
+                order_type="MARKET",
+                quantity=qty,
+                price=current_price,
+            )
+
+            if self.order_executor and hasattr(self.order_executor, "execute_order"):
+                trade_result = self.order_executor.execute_order(order)
+            elif self.portfolio_manager and hasattr(self.portfolio_manager, "record_sell"):
+                trade_result = self.portfolio_manager.record_sell(
+                    symbol=symbol,
+                    quantity=qty,
+                    price=current_price,
+                )
+            else:
+                trade_result = {"symbol": symbol, "side": "SELL", "quantity": qty, "price": current_price}
+
+            self.trades_history.append(trade_result)
+            return trade_result
+
+        return None

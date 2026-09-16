@@ -1,0 +1,21 @@
+import pandas as pd
+
+class SMACrossStrategy:
+    def __init__(self, short_window: int = 5, long_window: int = 20):
+        self.short_window = short_window
+        self.long_window = long_window
+        self.name = "SMA_Cross"
+
+    def generate_signal(self, prices: pd.Series) -> str:
+        if len(prices) < self.long_window:
+            return "HOLD"
+        
+        sma_short = prices.rolling(window=self.short_window).mean()
+        sma_long = prices.rolling(window=self.long_window).mean()
+        
+        if sma_short.iloc[-1] > sma_long.iloc[-1] and sma_short.iloc[-2] <= sma_long.iloc[-2]:
+            return "BUY"
+        elif sma_short.iloc[-1] < sma_long.iloc[-1] and sma_short.iloc[-2] >= sma_long.iloc[-2]:
+            return "SELL"
+        
+        return "HOLD"

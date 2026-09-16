@@ -1,0 +1,716 @@
+===== TEMPLATE FILES =====
+src/web/templates/index.html
+src/web/templates/login.html
+src/web/templates/dashboard.html
+===== WEB FILES =====
+src/web/server.py
+src/web/__pycache__/__init__.cpython-313.pyc
+src/web/__pycache__/app.cpython-313.pyc
+src/web/templates/index.html
+src/web/templates/login.html
+src/web/templates/dashboard.html
+src/web/__init__.py
+src/web/server.py.before_web_tests_fix
+src/web/main.py
+src/web/app.py
+src/web/index.html
+src/web/app.py.bak
+src/web/app.py.bak2
+src/web/app.py.bak_debug_telemetry
+src/web/index.html.bak_debug_telemetry
+src/web/app.py.bak_import_fix
+src/web/app.py.bak_1788593081
+src/web/app.py.bak_full_ui
+src/web/app.py.backup_20260905_112213
+src/web/app.py.bak_pre_fix
+src/web/app.py.bak.20260905_204900
+src/web/app.py.bak.20260905_205136
+src/web/app.py.backup_before_ui_merge_20260905_210454
+src/web/app.py.backup_before_ui_merge_20260905_211158
+===== DASHBOARD FILES =====
+src/dashboard/api.py
+src/dashboard/__pycache__/server.cpython-313.pyc
+src/dashboard/__pycache__/auth.cpython-313.pyc
+src/dashboard/auth.py
+src/dashboard/server.py
+===== ROUTE REFERENCES =====
+src/core/capital_manager.py:29:    def get_status(self) -> Dict[str, float]:
+src/core/trader_engine.py:16:    status: str = "OPEN"
+src/core/trader_engine.py:26:        status = self.capital_mgr.get_status()
+src/core/trader_engine.py:27:        current_equity = status.get("current_capital", 0.0)
+src/core/trader_engine.py:60:            if pos.symbol == symbol and pos.status == "OPEN":
+src/core/trader_engine.py:67:                pos.status = "CLOSED"
+src/core/trader_engine.py:76:    def get_portfolio_summary(self) -> Dict[str, Any]:
+src/core/trader_engine.py:78:            "capital_status": self.capital_mgr.get_status(),
+src/core/trader_engine.py:80:            "risk_status": self.risk_mgr.snapshot()
+src/core/trade_history.py:77:        capital_status: Dict[str, float],
+src/core/trade_history.py:96:            "capital_status": {
+src/core/trade_history.py:97:                "initial_capital": round(float(capital_status.get("initial_capital", 0.0)), 8),
+src/core/trade_history.py:98:                "current_capital": round(float(capital_status.get("current_capital", 0.0)), 8),
+src/core/trade_history.py:99:                "profit_reserve": round(float(capital_status.get("profit_reserve", 0.0)), 8),
+src/core/trade_history.py:100:                "total_value": round(float(capital_status.get("total_value", 0.0)), 8),
+src/core/risk_manager.py:411:    def get_risk_summary(self) -> Dict[str, Any]:
+src/core/paper_session.py:200:    def summary(self) -> Dict[str, Any]:
+src/core/paper_session.py:437:        "status": "CLOSED",
+src/core/trading_engine.py:6:class TradingEngine:
+src/core/trading_engine.py:74:                if isinstance(buy_res, dict) and buy_res.get("status") == "REJECTED":
+src/core/trading_engine.py:84:                "status": "FILLED",
+src/core/trading_engine.py:147:                "status": "FILLED",
+src/core/position_tracker.py:374:        status="OPEN",
+src/core/position_tracker.py:396:    position["status"] = "CLOSED"
+src/core/order_manager.py:37:        status: str = "PENDING",
+src/core/order_manager.py:45:        self.status = status.upper()
+src/core/order_manager.py:58:            "status": self.status,
+src/core/order_manager.py:107:    def update_order_status(
+src/core/order_manager.py:110:        status: str,
+src/core/order_manager.py:115:            order.status = status.upper()
+src/core/order_manager.py:118:            if status.upper() in ["FILLED", "CANCELLED", "REJECTED"]:
+src/core/order_manager.py:178:        order.status = "OPEN"
+src/core/order_manager.py:191:        status = getattr(order, "status", "")
+src/core/order_manager.py:192:        status = getattr(status, "value", status)
+src/core/order_manager.py:193:        if str(status).upper() not in ("OPEN", "PENDING"):
+src/core/order_manager.py:207:def _atria_v2_status(order):
+src/core/order_manager.py:211:        value = order.get("status")
+src/core/order_manager.py:214:            value = order["status"]
+src/core/order_manager.py:216:            value = getattr(order, "status", None)
+src/core/order_manager.py:220:def _atria_v2_get_order_status(self, order_id):
+src/core/order_manager.py:222:    return _atria_v2_status(order)
+src/core/order_manager.py:233:        status = _atria_v2_status(order)
+src/core/order_manager.py:234:        if status not in ("OPEN", "PENDING"):
+src/core/order_manager.py:249:OrderManager.get_order_status = _atria_v2_get_order_status
+src/core/order_manager.py:256:    """دسترسی هم‌زمان order['status'] و order.status."""
+src/core/order_manager.py:308:        active_status = str(active.get("status", "")).upper()
+src/core/order_manager.py:310:            active_status in ("OPEN", "PENDING")
+src/core/order_manager.py:331:        status="OPEN" if normalized_type == "LIMIT" else "PENDING",
+src/core/order_manager.py:346:    order["status"] = "FILLED"
+src/core/order_manager.py:359:    order["status"] = "CANCELLED"
+src/core/order_manager.py:363:def _atria_final_get_order_status(self, order_id):
+src/core/order_manager.py:365:    return None if order is None else str(order.get("status", "")).upper()
+src/core/order_manager.py:373:        if str(order.get("status", "")).upper() not in ("OPEN", "PENDING"):
+src/core/order_manager.py:385:OrderManager.get_order_status = _atria_final_get_order_status
+src/core/order_executor.py:3:هماهنگ با OrderManager، PositionTracker، RiskManager و PortfolioManager
+src/core/order_executor.py:100:            order["status"] = OrderStatus.FILLED
+src/core/order_executor.py:104:            order.status = OrderStatus.FILLED
+src/core/order_executor.py:119:            "status": OrderStatus.FILLED.value,
+src/core/order_executor.py:159:            "status": "FILLED",
+src/core/order_executor.py:176:        status_obj = _get_field(order, "status")
+src/core/order_executor.py:177:        status_val = status_obj.value if isinstance(status_obj, OrderStatus) else str(status_obj).upper()
+src/core/order_executor.py:179:        if status_val not in ["PENDING", "OPEN"]:
+src/core/order_executor.py:180:            return {"status": status_val, "order_id": order_id}
+src/core/order_executor.py:199:                order["status"] = OrderStatus.FILLED
+src/core/order_executor.py:203:                order.status = OrderStatus.FILLED
+src/core/order_executor.py:215:            return {"status": OrderStatus.FILLED.value, "order_id": order_id}
+src/core/order_executor.py:217:            return {"status": OrderStatus.PENDING.value, "order_id": order_id}
+src/core/order_executor.py:238:                if res.get("status") == OrderStatus.FILLED.value:
+src/core/order_executor.py:242:                            "status": "FILLED",
+src/core/backtest_engine.py:236:        return self.get_summary()
+src/core/backtest_engine.py:238:    def get_summary(self) -> Dict[str, Any]:
+src/core/data_manager.py:61:    def get_status(self) -> Dict[str, Any]:
+src/core/performance_analyzer.py:142:        """Full performance summary from trade history and equity curve."""
+src/core/backtest_performance.py:103:        - backtest summary
+src/core/order_simulator.py:18:    status: str
+src/core/order_simulator.py:137:                status="FILLED",
+src/core/order_simulator.py:162:                status = "FILLED"
+src/core/order_simulator.py:167:                status = "NEW"
+src/core/order_simulator.py:179:                status=status,
+src/core/order_simulator.py:192:        if order.status == "NEW":
+src/core/order_simulator.py:193:            order.status = "CANCELED"
+src/core/order_simulator.py:210:            if order.status == "NEW"
+src/core/order_simulator.py:217:            if order.status == "FILLED"
+src/core/portfolio_manager.py:6:class PortfolioManager:
+src/core/portfolio_manager.py:66:    def get_summary(self, current_prices: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
+src/core/portfolio_manager.py:107:                "status": "REJECTED",
+src/core/portfolio_manager.py:124:            "status": "FILLED",
+src/core/portfolio_manager.py:139:                "status": "REJECTED",
+src/core/portfolio_manager.py:159:            "status": "FILLED",
+src/core/recovery_manager.py:103:            status = "emergency_stop"
+src/core/recovery_manager.py:110:            status = "critical"
+src/core/recovery_manager.py:116:            status = "recovered"
+src/core/recovery_manager.py:121:            status = "recovering"
+src/core/recovery_manager.py:126:            status = "cooldown"
+src/core/recovery_manager.py:131:            status = "normal"
+src/core/recovery_manager.py:140:            "status": status,
+src/core/recovery_manager.py:183:    def get_status(self) -> Dict[str, Any]:
+src/core/trading_pipeline.py:179:            recovery_status = recovery_result.get("status", "normal")
+src/core/trading_pipeline.py:181:            blocked_statuses = {
+src/core/trading_pipeline.py:190:            if recovery_status in blocked_statuses:
+src/core/trading_pipeline.py:211:                "recovery_status": recovery_status,
+src/core/trading_pipeline.py:261:    def get_status(self) -> Dict[str, Any]:
+src/core/trading_pipeline.py:262:        """Return the current pipeline status."""
+src/core/execution_simulator.py:79:            "status": "rejected",
+src/core/execution_simulator.py:186:            "status": "filled",
+src/core/execution_simulator.py:216:    def get_status(self, prices: Dict[str, float] | None = None) -> Dict[str, Any]:
+src/core/integrated_pipeline.py:5:- PortfolioManager (asset allocations & holdings)
+src/core/integrated_pipeline.py:20:from src.core.portfolio_manager import PortfolioManager
+src/core/integrated_pipeline.py:46:        self.portfolio_manager = PortfolioManager(
+src/core/integrated_pipeline.py:89:        rec_status = self.recovery_manager.evaluate(current_dd)
+src/core/integrated_pipeline.py:92:        recovery_locked = self.recovery_manager.get_status().get("is_active", False)
+src/core/integrated_pipeline.py:125:                "recovery_status": rec_status,
+src/core/integrated_pipeline.py:140:                "recovery_status": rec_status,
+src/core/integrated_pipeline.py:156:        # 6. Mirror executed trade in PortfolioManager
+src/core/integrated_pipeline.py:157:        if sim_res.get("status") == "filled":
+src/core/integrated_pipeline.py:180:    def get_full_status(self, current_prices: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
+src/core/integrated_pipeline.py:181:        """Aggregate complete system status."""
+src/core/integrated_pipeline.py:192:            "drawdown_status": self.recovery_manager.get_status(),
+src/core/integrated_pipeline.py:193:            "portfolio_summary": self.portfolio_manager.get_summary(prices),
+src/core/integrated_pipeline.py:209:        return {"action": "HOLD", "status": "NO_STRATEGY"}
+src/core/integrated_pipeline.py:242:        "status": result.get("status", "FILLED"),
+src/core/integrated_pipeline.py:291:        return {"action": "HOLD", "status": "NO_STRATEGY"}
+src/core/integrated_pipeline.py:328:        "status": "FILLED",
+src/core/integrated_pipeline.py:385:def _atria_final_get_full_status(self):
+src/core/integrated_pipeline.py:456:            "status": "filled",
+src/core/integrated_pipeline.py:478:IntegratedTradingPipeline.get_full_status = _atria_final_get_full_status
+src/core/risk_manager.py.before_typo_fix:307:    def get_risk_summary(self) -> Dict[str, float]:
+src/core/order_executor.py.backup_20260824_174550:54:        if key == "status":
+src/core/order_executor.py.backup_20260824_174550:55:            status = getattr(self, "status", None)
+src/core/order_executor.py.backup_20260824_174550:56:            if hasattr(status, "value"):
+src/core/order_executor.py.backup_20260824_174550:57:                return status.value
+src/core/order_executor.py.backup_20260824_174550:58:            return status
+src/core/order_executor.py.backup_20260824_174550:230:        setattr(order, "status", OrderStatus.FILLED)
+src/core/order_executor.py.backup_20260824_174550:263:        setattr(order, "status", OrderStatus.PENDING)
+src/core/order_executor.py.backup_20260824_174550:292:        setattr(order, "status", OrderStatus.FILLED)
+src/core/order_executor.py.backup_20260824_174550:307:        setattr(order, "status", OrderStatus.CANCELLED)
+src/core/order_executor.py.before_limit_trigger_fix_20260824:54:        if key == "status":
+src/core/order_executor.py.before_limit_trigger_fix_20260824:55:            status = getattr(self, "status", None)
+src/core/order_executor.py.before_limit_trigger_fix_20260824:56:            if hasattr(status, "value"):
+src/core/order_executor.py.before_limit_trigger_fix_20260824:57:                return status.value
+src/core/order_executor.py.before_limit_trigger_fix_20260824:58:            return status
+src/core/order_executor.py.before_limit_trigger_fix_20260824:230:        setattr(order, "status", OrderStatus.FILLED)
+src/core/order_executor.py.before_limit_trigger_fix_20260824:263:        setattr(order, "status", OrderStatus.PENDING)
+src/core/order_executor.py.before_limit_trigger_fix_20260824:292:        setattr(order, "status", OrderStatus.FILLED)
+src/core/order_executor.py.before_limit_trigger_fix_20260824:307:        setattr(order, "status", OrderStatus.CANCELLED)
+src/core/order_executor.py.before_limit_fix_retry_20260824:54:        if key == "status":
+src/core/order_executor.py.before_limit_fix_retry_20260824:55:            status = getattr(self, "status", None)
+src/core/order_executor.py.before_limit_fix_retry_20260824:56:            if hasattr(status, "value"):
+src/core/order_executor.py.before_limit_fix_retry_20260824:57:                return status.value
+src/core/order_executor.py.before_limit_fix_retry_20260824:58:            return status
+src/core/order_executor.py.before_limit_fix_retry_20260824:230:        setattr(order, "status", OrderStatus.FILLED)
+src/core/order_executor.py.before_limit_fix_retry_20260824:263:        setattr(order, "status", OrderStatus.PENDING)
+src/core/order_executor.py.before_limit_fix_retry_20260824:292:        setattr(order, "status", OrderStatus.FILLED)
+src/core/order_executor.py.before_limit_fix_retry_20260824:307:        setattr(order, "status", OrderStatus.CANCELLED)
+src/core/paper_live_runner.py:39:            return {"status": "STOPPED", "reason": "Runner is not active"}
+src/core/paper_live_runner.py:48:            "status": "PROCESSED",
+src/core/paper_live_runner.py:89:            return {"status": "REJECTED", "reason": "Runner is stopped"}
+src/core/paper_live_runner.py:96:            return {"status": "REJECTED", "reason": "Invalid price"}
+src/core/paper_live_runner.py:106:                "status": "CLOSED",
+src/core/paper_live_runner.py:122:                "status": "REJECTED",
+src/core/paper_live_runner.py:131:                    "status": "REJECTED",
+src/core/paper_live_runner.py:147:                    "status": "FILLED",
+src/core/paper_live_runner.py:156:        return {"status": "REJECTED", "reason": "No actionable condition met"}
+src/core/monitoring.py:59:    def get_health_status(self) -> Dict[str, Any]:
+src/core/monitoring.py:60:        status = "HEALTHY"
+src/core/monitoring.py:62:            status = "DEGRADED"
+src/core/monitoring.py:64:            status = "UNHEALTHY"
+src/core/monitoring.py:66:            "status": status,
+src/core/circuit_breaker.py:85:    def get_status(self) -> Dict[str, Any]:
+src/core/lifecycle_coordinator.py:17:    Coordinates bot lifecycle states, component heartbeats, and system health status.
+src/core/lifecycle_coordinator.py:70:    def get_health_status(self) -> Dict[str, Any]:
+src/core/lifecycle_coordinator.py:72:        Calculates health metrics and identifies stale components.
+src/core/lifecycle_coordinator.py:81:        is_healthy = (
+src/core/lifecycle_coordinator.py:88:            "is_healthy": is_healthy,
+src/core/portfolio_drawdown_circuit_breaker.py:31:            return {"status": "INVALID_EQUITY", "is_tripped": self.is_tripped}
+src/core/liquidity_void_engine.py:25:    status: VoidStatus = VoidStatus.ACTIVE
+src/core/liquidity_void_engine.py:35:            "status": self.status.value,
+src/core/liquidity_void_engine.py:88:            status=VoidStatus.ACTIVE
+src/core/liquidity_void_engine.py:91:    def update_void_status(
+src/core/liquidity_void_engine.py:100:        if void.status == VoidStatus.FULLY_REBALANCED:
+src/core/liquidity_void_engine.py:101:            return void.status
+src/core/liquidity_void_engine.py:105:                void.status = VoidStatus.FULLY_REBALANCED
+src/core/liquidity_void_engine.py:107:                if void.status == VoidStatus.ACTIVE:
+src/core/liquidity_void_engine.py:108:                    void.status = VoidStatus.PARTIALLY_FILLED
+src/core/liquidity_void_engine.py:111:                void.status = VoidStatus.FULLY_REBALANCED
+src/core/liquidity_void_engine.py:113:                if void.status == VoidStatus.ACTIVE:
+src/core/liquidity_void_engine.py:114:                    void.status = VoidStatus.PARTIALLY_FILLED
+src/core/liquidity_void_engine.py:116:        return void.status
+src/core/fvg_tracker_engine.py:32:    status: FVGStatus = FVGStatus.UNTOUCHED
+src/core/fvg_tracker_engine.py:115:        Updates the fill ratio and status of tracked gaps against subsequent candles.
+src/core/fvg_tracker_engine.py:121:            if gap.status == FVGStatus.FULLY_FILLED or gap.status == FVGStatus.INVERTED:
+src/core/fvg_tracker_engine.py:144:                            gap.status = FVGStatus.FULLY_FILLED
+src/core/fvg_tracker_engine.py:147:                                gap.status = FVGStatus.INVERTED
+src/core/fvg_tracker_engine.py:149:                            gap.status = FVGStatus.PARTIALLY_FILLED
+src/core/fvg_tracker_engine.py:159:                            gap.status = FVGStatus.FULLY_FILLED
+src/core/fvg_tracker_engine.py:162:                                gap.status = FVGStatus.INVERTED
+src/core/fvg_tracker_engine.py:164:                            gap.status = FVGStatus.PARTIALLY_FILLED
+src/core/fvg_tracker_engine.py:171:        return [g for g in self.gaps if g.status in (FVGStatus.UNTOUCHED, FVGStatus.PARTIALLY_FILLED)]
+src/core/order_flow_imbalance_engine.py:71:                "status": "INSUFFICIENT_DATA",
+src/core/order_flow_imbalance_engine.py:115:            "status": "VALID",
+src/core/volume_profile_engine.py:33:                "status": "INSUFFICIENT_DATA",
+src/core/volume_profile_engine.py:51:                "status": "FLAT_MARKET",
+src/core/volume_profile_engine.py:92:                "status": "ZERO_VOLUME",
+src/core/volume_profile_engine.py:135:            "status": "VALID",
+src/core/liquidity_sweep_engine.py:66:                "status": "INSUFFICIENT_DATA",
+src/core/liquidity_sweep_engine.py:87:                        "status": "SWEEP_DETECTED",
+src/core/liquidity_sweep_engine.py:101:                        "status": "SWEEP_DETECTED",
+src/core/liquidity_sweep_engine.py:109:            "status": "NO_SWEEP",
+src/core/dynamic_leverage_engine.py:26:            return {"status": "INVALID_INPUT", "position_size": 0.0, "leverage": 1.0}
+src/core/dynamic_leverage_engine.py:30:            return {"status": "ZERO_SL_DISTANCE", "position_size": 0.0, "leverage": 1.0}
+src/core/dynamic_leverage_engine.py:51:            "status": "CALCULATED",
+src/core/strategy_aggregator.py:60:            "status": "AGGREGATED",
+src/core/risk_guard.py:57:    def get_guard_status(self) -> Dict[str, Any]:
+src/core/engine.py:9:class TradingEngine:
+src/core/profit_reserve.py:13:        :param portfolio: نمونه PortfolioManager اختیاری
+src/core/profit_reserve.py:45:    def get_summary(self) -> Dict[str, Any]:
+src/core/profit_reserve.py:53:# Compatibility method required by TradingEngine tests
+src/core/trading_engine.py.broken-20260902-221928:7:logger = logging.getLogger("AtriaTrade.TradingEngine")
+src/core/trading_engine.py.broken-20260902-221928:10:class TradingEngine:
+src/core/trading_engine.py.backup:10:logger = logging.getLogger("AtriaTrade.TradingEngine")
+src/core/trading_engine.py.backup:13:class TradingEngine:
+src/core/trading_engine.py.backup:189:                "status": "FILLED",
+src/core/trading_engine.py.before-final-fix:10:logger = logging.getLogger("AtriaTrade.TradingEngine")
+src/core/trading_engine.py.before-final-fix:13:class TradingEngine:
+src/core/trading_engine.py.before-final-fix:189:                "status": "FILLED",
+src/core/trading_engine.py.backup-before-buy-fix:10:logger = logging.getLogger("AtriaTrade.TradingEngine")
+src/core/trading_engine.py.backup-before-buy-fix:13:class TradingEngine:
+src/core/trading_engine.py.backup-before-buy-fix:189:                "status": "FILLED",
+src/core/profit_reserve.py.backup-before-vault-fix:13:        :param portfolio: نمونه PortfolioManager اختیاری
+src/core/profit_reserve.py.backup-before-vault-fix:45:    def get_summary(self) -> Dict[str, Any]:
+src/core/trading_engine.py.backup-before-profit-fix:10:logger = logging.getLogger("AtriaTrade.TradingEngine")
+src/core/trading_engine.py.backup-before-profit-fix:13:class TradingEngine:
+src/core/trading_engine.py.backup-before-profit-fix:188:                "status": "FILLED",
+src/core/profit_reserve.py.backup-before-profit-fix:13:        :param portfolio: نمونه PortfolioManager اختیاری
+src/core/profit_reserve.py.backup-before-profit-fix:45:    def get_summary(self) -> Dict[str, Any]:
+src/core/profit_reserve.py.backup-before-profit-fix:53:# Compatibility method required by TradingEngine tests
+src/core/trading_engine.py.backup-before-vault-connection:10:logger = logging.getLogger("AtriaTrade.TradingEngine")
+src/core/trading_engine.py.backup-before-vault-connection:13:class TradingEngine:
+src/core/trading_engine.py.backup-before-vault-connection:188:                "status": "FILLED",
+src/core/trading_engine.py.backup-before-final-fix:10:logger = logging.getLogger("AtriaTrade.TradingEngine")
+src/core/trading_engine.py.backup-before-final-fix:13:class TradingEngine:
+src/core/trading_engine.py.backup-before-final-fix:188:                "status": "FILLED",
+src/core/strategy_manager.py:45:        این متد در هر تیک (Tick) توسط TradingEngine فراخوانی می‌شود.
+src/core/trading_engine.py.bak.20260903_220353:4:class TradingEngine:
+src/core/portfolio_manager.py.bak:4:class PortfolioManager:
+src/core/portfolio_manager.py.bak:135:                "status": "REJECTED",
+src/core/portfolio_manager.py.bak:182:            "status": "FILLED",
+src/core/portfolio_manager.py.bak:207:                "status": "REJECTED",
+src/core/portfolio_manager.py.bak:215:                "status": "REJECTED",
+src/core/portfolio_manager.py.bak:249:            "status": "FILLED",
+src/core/portfolio_manager.py.bak:272:            "status": "NOOP",
+src/core/trading_engine.py.bak:6:class TradingEngine:
+src/core/trading_engine.py.bak:71:                if buy_res.get("status") == "REJECTED":
+src/core/trading_engine.py.bak:79:                "status": "FILLED",
+src/core/trading_engine.py.bak:121:                "status": "FILLED",
+src/core/profit_reserve.py.bak:13:        :param portfolio: نمونه PortfolioManager اختیاری
+src/core/profit_reserve.py.bak:45:    def get_summary(self) -> Dict[str, Any]:
+src/core/profit_reserve.py.bak:53:# Compatibility method required by TradingEngine tests
+src/exchange_simulator.py:33:                return {"status": "REJECTED", "reason": "Insufficient USDT balance"}
+src/exchange_simulator.py:38:                return {"status": "REJECTED", "reason": "Insufficient BTC balance"}
+src/exchange_simulator.py:43:            return {"status": "REJECTED", "reason": "Invalid side"}
+src/exchange_simulator.py:46:            "status": "FILLED",
+src/strategies/sma_cross_strategy.py:90:            # مدیریت پورتفوی شبیه‌سازی FakeTradingEngine در تست‌ها
+src/strategies/sma_cross_strategy.py.bak.20260903_195817:100:            self.logger.error("TradingEngine signal handler not found!")
+src/exchange/exchange_simulator.py:223:    def get_status(self) -> Dict[str, object]:
+src/exchange/exchange_simulator.py:224:        """Return simulator status."""
+src/exchange/adapters/dummy_exchange.py:32:            status="FILLED",
+src/exchange/adapters/binance_testnet.py:35:        return response.status_code == 200
+src/exchange/adapters/binance_testnet.py:40:        price_resp.raise_for_status()
+src/exchange/adapters/binance_testnet.py:44:        book_resp.raise_for_status()
+src/exchange/adapters/binance_testnet.py:81:        response.raise_for_status()
+src/exchange/adapters/binance_testnet.py:87:            status=data.get("status"),
+src/exchange/adapters/nobitex.py:50:        return response.status_code == 200
+src/exchange/adapters/nobitex.py:65:        response.raise_for_status()
+src/exchange/adapters/nobitex.py:69:        if data.get("status") != "ok":
+src/exchange/models.py:16:    status: str
+src/exchange/health.py:21:    is_healthy: bool
+src/exchange/health.py:113:                    is_healthy=True,
+src/exchange/health.py:120:                is_healthy=False,
+src/exchange/health.py:138:                is_healthy=False,
+src/exchange/health.py:157:            status = self.check_exchange(exchange_name)
+src/exchange/health.py:158:            results[status.exchange_name] = status
+src/backtest/backtest_engine.py:65:    def get_summary(self):
+src/dashboard/api.py:12:        health_monitor: Optional[SystemHealthMonitor] = None,
+src/dashboard/api.py:16:        self.health_monitor = health_monitor or SystemHealthMonitor()
+src/dashboard/api.py:17:        self.alert_manager = alert_manager or self.health_monitor.alert_manager
+src/dashboard/api.py:20:    def get_system_summary(self) -> Dict[str, Any]:
+src/dashboard/api.py:22:        health = self.health_monitor.get_health_status()
+src/dashboard/api.py:28:            "health": health,
+src/dashboard/api.py:35:        """دریافت آخرین وضعیت پورتفولیو در صورت اتصال به PortfolioManager"""
+src/dashboard/api.py:38:                "status": "UNAVAILABLE",
+src/dashboard/api.py:44:        # اگر پورتفولیو منیجر متد get_portfolio_summary داشت فراخوانی می‌کنیم
+src/dashboard/api.py:45:        if hasattr(self.portfolio_manager, "get_portfolio_summary"):
+src/dashboard/api.py:46:            return self.portfolio_manager.get_portfolio_summary()
+src/dashboard/api.py:49:                "status": "AVAILABLE",
+src/dashboard/api.py:54:        return {"status": "UNKNOWN_INTERFACE"}
+src/dashboard/api.py:58:        health = self.health_monitor.get_health_status()
+src/dashboard/api.py:60:            "is_alive": health.get("is_alive", False),
+src/dashboard/api.py:61:            "status": health.get("status", "UNKNOWN"),
+src/dashboard/api.py:62:            "total_ticks": health.get("total_ticks", 0),
+src/dashboard/api.py:63:            "error_count": health.get("error_count", 0),
+src/dashboard/server.py:3:Provides secure endpoints for bot telemetry, status, and control.
+src/dashboard/server.py:12:            "status": "RUNNING",
+src/dashboard/server.py:19:    def get_public_status(self) -> Dict[str, Any]:
+src/dashboard/server.py:23:    def get_dashboard_summary(self, token: str, client_ip: str = "127.0.0.1") -> Dict[str, Any]:
+src/adapters/nobitex_paper.py:108:            return {"status": "failed", "error": "Order amount must be greater than zero"}
+src/adapters/nobitex_paper.py:124:                    "status": "failed",
+src/adapters/nobitex_paper.py:136:                    "status": "failed",
+src/adapters/nobitex_paper.py:146:            return {"status": "failed", "error": f"Invalid order side: {side}"}
+src/adapters/nobitex_paper.py:157:            "status": "FILLED",
+src/adapters/nobitex_paper.py:161:        return {"status": "success", "order": order_record}
+src/adapters/nobitex_paper.py:166:            if self.orders[order_id]["status"] == "FILLED":
+src/adapters/nobitex_paper.py:167:                return {"status": "failed", "error": "Cannot cancel already filled order"}
+src/adapters/nobitex_paper.py:168:            self.orders[order_id]["status"] = "CANCELED"
+src/adapters/nobitex_paper.py:169:            return {"status": "success", "message": f"Order {order_id} canceled"}
+src/adapters/nobitex_paper.py:170:        return {"status": "failed", "error": "Order not found"}
+src/adapters/nobitex_paper.py:172:    def get_order_status(self, order_id: str) -> Dict[str, Any]:
+src/adapters/nobitex_paper.py:173:        """Query status of a specific order."""
+src/adapters/nobitex_paper.py:175:            return {"status": "success", "order": self.orders[order_id]}
+src/adapters/nobitex_paper.py:176:        return {"status": "failed", "error": "Order not found"}
+src/adapters/wallex_paper.py:105:            return {"status": "failed", "error": "Order amount must be greater than zero"}
+src/adapters/wallex_paper.py:120:                    "status": "failed",
+src/adapters/wallex_paper.py:132:                    "status": "failed",
+src/adapters/wallex_paper.py:142:            return {"status": "failed", "error": f"Invalid order side: {side}"}
+src/adapters/wallex_paper.py:154:            "status": "FILLED",
+src/adapters/wallex_paper.py:158:        return {"status": "success", "result": order_record}
+src/adapters/wallex_paper.py:163:            if self.orders[client_order_id]["status"] == "FILLED":
+src/adapters/wallex_paper.py:164:                return {"status": "failed", "error": "Cannot cancel filled order"}
+src/adapters/wallex_paper.py:165:            self.orders[client_order_id]["status"] = "CANCELED"
+src/adapters/wallex_paper.py:166:            return {"status": "success", "message": "Order canceled"}
+src/adapters/wallex_paper.py:167:        return {"status": "failed", "error": "Order not found"}
+src/adapters/wallex_paper.py:172:            return {"status": "success", "result": self.orders[client_order_id]}
+src/adapters/wallex_paper.py:173:        return {"status": "failed", "error": "Order not found"}
+src/web/server.py:2:from fastapi import FastAPI, Request, Form, Depends, HTTPException, status
+src/web/server.py:20:bot_status = {
+src/web/server.py:38:            status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+src/web/server.py:45:    return templates.TemplateResponse("login.html", {"request": request, "error": None})
+src/web/server.py:52:        bot_status["logs"].append("[AUTH] Admin successfully authenticated.")
+src/web/server.py:53:        response = RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
+src/web/server.py:57:        return templates.TemplateResponse("login.html", {
+src/web/server.py:73:    return templates.TemplateResponse("dashboard.html", {
+src/web/server.py:75:        "status": bot_status
+src/web/server.py:78:@app.get("/api/status")
+src/web/server.py:79:async def get_status(authenticated: bool = Depends(check_auth)):
+src/web/server.py:80:    return JSONResponse(content=bot_status)
+src/web/server.py:84:    bot_status["is_running"] = True
+src/web/server.py:85:    bot_status["logs"].append("[ENGINE] Bot execution started by Admin.")
+src/web/server.py:86:    return {"status": "success", "message": "ربات فعال شد"}
+src/web/server.py:90:    bot_status["is_running"] = False
+src/web/server.py:91:    bot_status["logs"].append("[PANIC] Engine stopped immediately by Admin.")
+src/web/server.py:92:    return {"status": "success", "message": "ربات متوقف شد"}
+src/web/templates/index.html:17:            <div class="bg-green-900 text-green-300 px-4 py-2 rounded-lg text-sm font-bold border border-green-700">🟢 {{ status }}</div>
+src/web/templates/index.html:22:                <p id="health-status" class="text-gray-400">در حال اتصال...</p>
+src/web/templates/index.html:27:        fetch('/health').then(res => res.json()).then(data => {
+src/web/templates/index.html:28:            document.getElementById('health-status').innerHTML = `وضعیت API: <span class="text-green-400">متصل</span><br>حالت: ${data.mode}`;
+src/web/templates/index.html:30:            document.getElementById('health-status').innerHTML = '<span class="text-red-500">خطا در ارتباط</span>';
+src/web/templates/dashboard.html:142:                const res = await fetch('/api/telemetry');
+src/web/server.py.before_web_tests_fix:16:            "status": "online",
+src/web/server.py.before_web_tests_fix:19:            "risk": {"max_drawdown": 0.05, "status": "safe"}
+src/web/server.py.before_web_tests_fix:22:    def get_status(self) -> Dict[str, Any]:
+src/web/server.py.before_web_tests_fix:23:        return {"status": "running", "mode": "paper_trading"}
+src/web/server.py.before_web_tests_fix:31:    def get_risk_status(self) -> Dict[str, Any]:
+src/web/server.py.before_web_tests_fix:32:        return {"status": "normal", "risk_level": "low"}
+src/web/server.py.before_web_tests_fix:86:            raise HTTPException(status_code=401, detail="Unauthorized")
+src/web/server.py.before_web_tests_fix:90:    def handle_get_status(self) -> Dict[str, Any]:
+src/web/server.py.before_web_tests_fix:91:        if hasattr(self.state_provider, "get_status"):
+src/web/server.py.before_web_tests_fix:92:            return self.state_provider.get_status()
+src/web/server.py.before_web_tests_fix:93:        return {"status": "running", "mode": "paper_trading"}
+src/web/server.py.before_web_tests_fix:106:        if hasattr(self.state_provider, "get_risk_status"):
+src/web/server.py.before_web_tests_fix:107:            return self.state_provider.get_risk_status()
+src/web/server.py.before_web_tests_fix:110:        return {"status": "normal", "risk_level": "low"}
+src/web/server.py.before_web_tests_fix:116:            "status": self.handle_get_status(),
+src/web/server.py.before_web_tests_fix:126:        return {"status": "paused", "message": "Trading operations paused"}
+src/web/server.py.before_web_tests_fix:132:        return {"status": "active", "message": "Trading operations resumed"}
+src/web/server.py.before_web_tests_fix:138:        return {"status": "panic_triggered", "message": "Panic mode activated, all operations halted"}
+src/web/server.py.before_web_tests_fix:142:        @self.app.get("/api/v1/health")
+src/web/server.py.before_web_tests_fix:143:        def health_check():
+src/web/server.py.before_web_tests_fix:144:            return {"status": "ok"}
+src/web/server.py.before_web_tests_fix:146:        @self.app.get("/api/v1/status")
+src/web/server.py.before_web_tests_fix:147:        def get_status(authorized: bool = Depends(self._verify_auth)):
+src/web/server.py.before_web_tests_fix:148:            return self.handle_get_status()
+src/web/main.py:30:    return templates.TemplateResponse("index.html", {"request": request, "status": "Paper Mode (Safe)"})
+src/web/main.py:32:@app.get("/health")
+src/web/main.py:33:async def health_check():
+src/web/main.py:34:    return {"status": "ok", "mode": "Paper Trading", "security": "No Real API Keys"}
+src/web/app.py:90:        status_code=401,
+src/web/app.py:105:    status: str
+src/web/app.py:132:    return templates.TemplateResponse(
+src/web/app.py:133:        "dashboard.html",
+src/web/app.py:140:    return templates.TemplateResponse(
+src/web/app.py:141:        "dashboard.html",
+src/web/app.py:150:    "/api/public/status",
+src/web/app.py:152:    summary="Get Public System Status",
+src/web/app.py:155:async def get_public_status_endpoint(request: Request):
+src/web/app.py:164:    "/api/dashboard/summary",
+src/web/app.py:166:    summary="Get Authenticated Dashboard Summary",
+src/web/app.py:170:async def get_dashboard_summary_endpoint(
+src/web/app.py:178:        result = await dashboard_server.get_dashboard_summary(
+src/web/app.py:184:                status_code=401,
+src/web/app.py:194:                    status_code=500,
+src/web/app.py:211:            status="RUNNING",
+src/web/app.py:223:    summary="Update Bot State Parameter",
+src/web/app.py:243:                status_code=403,
+src/web/index.html:149:                const res = await fetch("/api/telemetry?t=" + Date.now());
+src/web/app.py.bak:12:from src.core.trading_engine import TradingEngine
+src/web/app.py.bak:13:from src.core.portfolio_manager import PortfolioManager
+src/web/app.py.bak:25:portfolio_mgr = PortfolioManager(initial_balance=initial_balance)
+src/web/app.py.bak:30:engine = TradingEngine(
+src/web/app.py.bak:49:    index_path = os.path.join(os.path.dirname(__file__), "index.html")
+src/web/app.py.bak:53:    return HTMLResponse("<h1>داشبورد AtriaTrade: فایل index.html یافت نشد!</h1>", status_code=404)
+src/web/app.py.bak:55:@app.get("/api/status")
+src/web/app.py.bak:56:async def get_status():
+src/web/app.py.bak:57:    summary = portfolio_mgr.get_summary() if hasattr(portfolio_mgr, "get_summary") else {}
+src/web/app.py.bak:71:        "status": "online",
+src/web/app.py.bak:75:        "equity": summary.get("equity", current_balance),
+src/web/app.py.bak:76:        "total_profit": summary.get("total_profit", 0.0),
+src/web/app.py.bak:86:    status_str = "فعال" if is_autopilot_active else "متوقف"
+src/web/app.py.bak:87:    log_msg = f"سیستم اتوپایلوت {status_str} شد."
+src/web/app.py.bak:115:            res = {"status": "FILLED", "symbol": req.symbol, "side": req.side, "amount": req.amount}
+src/web/app.py.bak:123:        raise HTTPException(status_code=400, detail=err_msg)
+src/web/app.py.bak:138:        raise HTTPException(status_code=500, detail=err_msg)
+src/web/app.py.bak2:12:from src.core.trading_engine import TradingEngine
+src/web/app.py.bak2:13:from src.core.portfolio_manager import PortfolioManager
+src/web/app.py.bak2:25:portfolio_mgr = PortfolioManager(initial_balance=initial_balance)
+src/web/app.py.bak2:30:engine = TradingEngine(
+src/web/app.py.bak2:49:    index_path = os.path.join(os.path.dirname(__file__), "index.html")
+src/web/app.py.bak2:53:    return HTMLResponse("<h1>داشبورد AtriaTrade: فایل index.html یافت نشد!</h1>", status_code=404)
+src/web/app.py.bak2:55:@app.get("/api/status")
+src/web/app.py.bak2:56:async def get_status():
+src/web/app.py.bak2:57:    summary = portfolio_mgr.get_summary() if hasattr(portfolio_mgr, "get_summary") else {}
+src/web/app.py.bak2:71:        "status": "online",
+src/web/app.py.bak2:75:        "equity": summary.get("equity", current_balance),
+src/web/app.py.bak2:76:        "total_profit": summary.get("total_profit", 0.0),
+src/web/app.py.bak2:86:    status_str = "فعال" if is_autopilot_active else "متوقف"
+src/web/app.py.bak2:87:    log_msg = f"سیستم اتوپایلوت {status_str} شد."
+src/web/app.py.bak2:115:            res = {"status": "FILLED", "symbol": req.symbol, "side": req.side, "amount": req.amount}
+src/web/app.py.bak2:123:        raise HTTPException(status_code=400, detail=err_msg)
+src/web/app.py.bak2:138:        raise HTTPException(status_code=500, detail=err_msg)
+src/web/app.py.bak_debug_telemetry:11:from src.core.trading_engine import TradingEngine
+src/web/app.py.bak_debug_telemetry:12:from src.core.portfolio_manager import PortfolioManager
+src/web/app.py.bak_debug_telemetry:24:portfolio_mgr = PortfolioManager(initial_balance=initial_balance)
+src/web/app.py.bak_debug_telemetry:29:engine = TradingEngine(
+src/web/app.py.bak_debug_telemetry:78:    index_path = os.path.join(os.path.dirname(__file__), "index.html")
+src/web/app.py.bak_debug_telemetry:82:    return HTMLResponse("<h1>داشبورد AtriaTrade: فایل index.html یافت نشد!</h1>", status_code=404)
+src/web/app.py.bak_debug_telemetry:84:def build_telemetry_payload():
+src/web/app.py.bak_debug_telemetry:85:    summary = portfolio_mgr.get_summary() if hasattr(portfolio_mgr, "get_summary") else {}
+src/web/app.py.bak_debug_telemetry:105:        "status": "online",
+src/web/app.py.bak_debug_telemetry:113:        "equity": summary.get("equity", current_balance),
+src/web/app.py.bak_debug_telemetry:114:        "total_profit": summary.get("total_profit", 0.0),
+src/web/app.py.bak_debug_telemetry:123:@app.get("/api/telemetry")
+src/web/app.py.bak_debug_telemetry:124:async def get_telemetry():
+src/web/app.py.bak_debug_telemetry:125:    return build_telemetry_payload()
+src/web/app.py.bak_debug_telemetry:127:@app.get("/api/status")
+src/web/app.py.bak_debug_telemetry:128:async def get_status():
+src/web/app.py.bak_debug_telemetry:129:    return build_telemetry_payload()
+src/web/app.py.bak_debug_telemetry:135:    status_str = "فعال" if is_autopilot_active else "متوقف"
+src/web/app.py.bak_debug_telemetry:136:    log_msg = f"سیستم اتوپایلوت {status_str} شد."
+src/web/app.py.bak_debug_telemetry:165:            res = {"status": "FILLED", "symbol": req.symbol, "side": req.side, "amount": req.amount, "price": exec_price}
+src/web/app.py.bak_debug_telemetry:173:        raise HTTPException(status_code=400, detail=err_msg)
+src/web/app.py.bak_debug_telemetry:188:        raise HTTPException(status_code=500, detail=err_msg)
+src/web/index.html.bak_debug_telemetry:149:                const res = await fetch("/api/telemetry?t=" + Date.now());
+src/web/app.py.bak_import_fix:10:from src.core.portfolio_manager import PortfolioManager
+src/web/app.py.bak_import_fix:17:portfolio_mgr = PortfolioManager(initial_balance=initial_balance)
+src/web/app.py.bak_import_fix:48:    index_path = os.path.join(os.path.dirname(__file__), "index.html")
+src/web/app.py.bak_import_fix:54:def build_telemetry_payload():
+src/web/app.py.bak_import_fix:55:    summary = portfolio_mgr.get_summary() if hasattr(portfolio_mgr, "get_summary") else {}
+src/web/app.py.bak_import_fix:103:        "status": "online",
+src/web/app.py.bak_import_fix:112:        "equity": round(summary.get("equity", current_balance), 2),
+src/web/app.py.bak_import_fix:113:        "total_profit": round(summary.get("total_profit", 0.0), 2),
+src/web/app.py.bak_import_fix:122:@app.get("/api/telemetry")
+src/web/app.py.bak_import_fix:123:async def get_telemetry():
+src/web/app.py.bak_import_fix:124:    return build_telemetry_payload()
+src/web/app.py.bak_import_fix:126:@app.get("/api/status")
+src/web/app.py.bak_import_fix:127:async def get_status():
+src/web/app.py.bak_import_fix:128:    return build_telemetry_payload()
+src/web/app.py.bak_import_fix:134:    status_str = "فعال" if is_autopilot_active else "غیرفعال"
+src/web/app.py.bak_import_fix:135:    system_logs.append(f"وضعیت اتوپایلوت تغییر یافت: {status_str}")
+src/web/app.py.bak_import_fix:136:    return {"status": "ok", "autopilot": is_autopilot_active}
+src/web/app.py.bak_import_fix:147:        # Create position in PortfolioManager
+src/web/app.py.bak_import_fix:162:        return {"status": "success", "message": log_msg, "order": pos_data}
+src/web/app.py.bak_import_fix:166:        raise HTTPException(status_code=400, detail=err_msg)
+src/web/app.py.bak_import_fix:190:        return {"status": "success", "message": log_msg}
+src/web/app.py.bak_import_fix:191:    return {"status": "error", "message": "پوزیشن فعالی یافت نشد."}
+src/web/app.py.bak_import_fix:200:    return {"status": "panic_executed"}
+src/web/app.py.bak_1788593081:12:    from src.core.portfolio_manager import PortfolioManager
+src/web/app.py.bak_1788593081:14:    PortfolioManager = None
+src/web/app.py.bak_1788593081:28:if PortfolioManager:
+src/web/app.py.bak_1788593081:30:        portfolio_mgr = PortfolioManager(initial_balance=initial_balance)
+src/web/app.py.bak_1788593081:32:        portfolio_mgr = PortfolioManager(initial_cash=initial_balance)
+src/web/app.py.bak_1788593081:34:    class MockPortfolioManager:
+src/web/app.py.bak_1788593081:40:        def get_summary(self):
+src/web/app.py.bak_1788593081:42:    portfolio_mgr = MockPortfolioManager(initial_cash=initial_balance)
+src/web/app.py.bak_1788593081:90:    index_path = os.path.join(os.path.dirname(__file__), "index.html")
+src/web/app.py.bak_1788593081:96:def build_telemetry_payload():
+src/web/app.py.bak_1788593081:97:    summary = portfolio_mgr.get_summary() if hasattr(portfolio_mgr, "get_summary") else {}
+src/web/app.py.bak_1788593081:135:        "status": "online",
+src/web/app.py.bak_1788593081:148:        "equity": round(summary.get("equity", current_balance), 2),
+src/web/app.py.bak_1788593081:149:        "total_profit": round(summary.get("total_profit", 0.0), 2),
+src/web/app.py.bak_1788593081:163:@app.get("/api/telemetry")
+src/web/app.py.bak_1788593081:164:async def get_telemetry():
+src/web/app.py.bak_1788593081:165:    return build_telemetry_payload()
+src/web/app.py.bak_1788593081:167:@app.get("/api/status")
+src/web/app.py.bak_1788593081:168:async def get_status():
+src/web/app.py.bak_1788593081:169:    return build_telemetry_payload()
+src/web/app.py.bak_1788593081:175:    status_str = "فعال" if is_autopilot_active else "غیرفعال"
+src/web/app.py.bak_1788593081:176:    system_logs.append(f"وضعیت اتوپایلوت تغییر یافت: {status_str}")
+src/web/app.py.bak_1788593081:177:    return {"status": "ok", "autopilot": is_autopilot_active}
+src/web/app.py.bak_1788593081:215:        return {"status": "success", "message": log_msg, "order": pos_data}
+src/web/app.py.bak_1788593081:219:        raise HTTPException(status_code=400, detail=err_msg)
+src/web/app.py.bak_1788593081:249:        return {"status": "success", "message": log_msg, "pnl": round(pnl, 2)}
+src/web/app.py.bak_1788593081:251:    return {"status": "error", "message": "پوزیشن فعالی یافت نشد."}
+src/web/app.py.bak_1788593081:260:    return {"status": "panic_executed"}
+src/web/app.py.bak_full_ui:22:    "bot_status": "active",
+src/web/app.py.bak_full_ui:51:            "status": "CLOSED"
+src/web/app.py.bak_full_ui:61:            "status": "CLOSED"
+src/web/app.py.bak_full_ui:73:    index_path = os.path.join(TEMPLATES_DIR, "index.html")
+src/web/app.py.bak_full_ui:75:        index_path = os.path.join(BASE_DIR, "index.html")
+src/web/app.py.bak_full_ui:82:@app.get("/api/status")
+src/web/app.py.bak_full_ui:83:@app.get("/api/telemetry")
+src/web/app.py.bak_full_ui:84:async def get_status():
+src/web/app.py.bak_full_ui:86:        "status": "ok",
+src/web/app.py.bak_full_ui:87:        "bot_status": state["bot_status"],
+src/web/app.py.bak_full_ui:113:    state["bot_status"] = "active"
+src/web/app.py.bak_full_ui:115:    return JSONResponse({"status": "started", "bot_status": "active"})
+src/web/app.py.bak_full_ui:119:    state["bot_status"] = "paused"
+src/web/app.py.bak_full_ui:121:    return JSONResponse({"status": "paused", "bot_status": "paused"})
+src/web/app.py.backup_20260905_112213:21:        self.bot_status: str = "STOPPED"  # RUNNING, PAUSED, STOPPED
+src/web/app.py.backup_20260905_112213:178:            "status": "COMPLETED (Simulated)"
+src/web/app.py.backup_20260905_112213:188:        self.bot_status = "STOPPED"
+src/web/app.py.backup_20260905_112213:197:        if state.bot_status == "RUNNING" and state.mode in ["AUTO", "SEMI_AUTO"]:
+src/web/app.py.backup_20260905_112213:289:        return {"status": "ok", "token": token}
+src/web/app.py.backup_20260905_112213:290:    return JSONResponse(status_code=401, content={"error": "رمز عبور اشتباه است"})
+src/web/app.py.backup_20260905_112213:299:@app.get("/api/status")
+src/web/app.py.backup_20260905_112213:301:    return {"status": "ok", "bot_status": state.bot_status}
+src/web/app.py.backup_20260905_112213:305:    state.bot_status = "STOPPED"
+src/web/app.py.backup_20260905_112213:307:    return {"status": "ok", "bot_status": state.bot_status}
+src/web/app.py.backup_20260905_112213:314:        return {"status": "ok", "mode": state.mode}
+src/web/app.py.backup_20260905_112213:315:    return JSONResponse(status_code=400, content={"error": "Invalid mode"})
+src/web/app.py.backup_20260905_112213:324:    return {"status": "ok"}
+src/web/app.py.backup_20260905_112213:329:    return {"status": "ok" if success else "failed"}
+src/web/app.py.backup_20260905_112213:334:    return {"status": "ok", "message": "All positions liquidated"}
+src/web/app.py.backup_20260905_112213:339:    return {"status": "ok" if ok else "failed"}
+src/web/app.py.backup_20260905_112213:345:        return {"status": "ok", "message": msg}
+src/web/app.py.backup_20260905_112213:346:    return JSONResponse(status_code=400, content={"error": msg})
+src/web/app.py.backup_20260905_112213:436:        .status-dot { width: 10px; height: 10px; border-radius: 50%; }
+src/web/app.py.backup_20260905_112213:564:                <div id="statusDot" class="status-dot dot-stopped"></div>
+src/web/app.py.backup_20260905_112213:565:                <span id="statusText">STOPPED</span>
+src/web/app.py.backup_20260905_112213:780:            const res = await fetch('/api/status');
+src/web/app.py.backup_20260905_112213:784:            const dot = document.getElementById('statusDot');
+src/web/app.py.backup_20260905_112213:785:            const stText = document.getElementById('statusText');
+src/web/app.py.backup_20260905_112213:786:            if (data.bot_status === "RUNNING") {
+src/web/app.py.backup_20260905_112213:787:                dot.className = "status-dot dot-running";
+src/web/app.py.backup_20260905_112213:790:                dot.className = "status-dot dot-stopped";
+src/web/app.py.backup_20260905_112213:791:                stText.innerText = data.bot_status;
+src/web/app.py.bak_pre_fix:21:        self.bot_status: str = "STOPPED"  # RUNNING, PAUSED, STOPPED
+src/web/app.py.bak_pre_fix:178:            "status": "COMPLETED (Simulated)"
+src/web/app.py.bak_pre_fix:188:        self.bot_status = "STOPPED"
+src/web/app.py.bak_pre_fix:197:        if state.bot_status == "RUNNING" and state.mode in ["AUTO", "SEMI_AUTO"]:
+src/web/app.py.bak_pre_fix:289:        return {"status": "ok", "token": token}
+src/web/app.py.bak_pre_fix:290:    return JSONResponse(status_code=401, content={"error": "رمز عبور اشتباه است"})
+src/web/app.py.bak_pre_fix:299:@app.get("/api/status")
+src/web/app.py.bak_pre_fix:301:    return {"status": "ok", "bot_status": state.bot_status}
+src/web/app.py.bak_pre_fix:305:    state.bot_status = "STOPPED"
+src/web/app.py.bak_pre_fix:307:    return {"status": "ok", "bot_status": state.bot_status}
+src/web/app.py.bak_pre_fix:314:        return {"status": "ok", "mode": state.mode}
+src/web/app.py.bak_pre_fix:315:    return JSONResponse(status_code=400, content={"error": "Invalid mode"})
+src/web/app.py.bak_pre_fix:324:    return {"status": "ok"}
+src/web/app.py.bak_pre_fix:329:    return {"status": "ok" if success else "failed"}
+src/web/app.py.bak_pre_fix:334:    return {"status": "ok", "message": "All positions liquidated"}
+src/web/app.py.bak_pre_fix:339:    return {"status": "ok" if ok else "failed"}
+src/web/app.py.bak_pre_fix:345:        return {"status": "ok", "message": msg}
+src/web/app.py.bak_pre_fix:346:    return JSONResponse(status_code=400, content={"error": msg})
+src/web/app.py.bak_pre_fix:436:        .status-dot { width: 10px; height: 10px; border-radius: 50%; }
+src/web/app.py.bak_pre_fix:564:                <div id="statusDot" class="status-dot dot-stopped"></div>
+src/web/app.py.bak_pre_fix:565:                <span id="statusText">STOPPED</span>
+src/web/app.py.bak_pre_fix:780:            const res = await fetch('/api/status');
+src/web/app.py.bak_pre_fix:784:            const dot = document.getElementById('statusDot');
+src/web/app.py.bak_pre_fix:785:            const stText = document.getElementById('statusText');
+src/web/app.py.bak_pre_fix:786:            if (data.bot_status === "RUNNING") {
+src/web/app.py.bak_pre_fix:787:                dot.className = "status-dot dot-running";
+src/web/app.py.bak_pre_fix:790:                dot.className = "status-dot dot-stopped";
+src/web/app.py.bak_pre_fix:791:                stText.innerText = data.bot_status;
+src/web/app.py.bak.20260905_204900:4:Integrates DashboardServer for bot telemetry and control.
+src/web/app.py.bak.20260905_204900:13:import time # Added for timestamp in public status
+src/web/app.py.bak.20260905_204900:96:    """Response model for the public status endpoint."""
+src/web/app.py.bak.20260905_204900:99:    timestamp: float = Field(..., description="Unix timestamp of when the status was checked.")
+src/web/app.py.bak.20260905_204900:103:    status: str = Field(..., description="Current status of the bot (e.g., RUNNING, STOPPED, PAUSED, ERROR).")
+src/web/app.py.bak.20260905_204900:110:    """Comprehensive response model for the authenticated dashboard summary."""
+src/web/app.py.bak.20260905_204900:127:    "/api/public/status",
+src/web/app.py.bak.20260905_204900:129:    summary="Get Public System Status",
+src/web/app.py.bak.20260905_204900:131:    description="Provides a simple, unauthenticated health check for the AtriaTrade API service."
+src/web/app.py.bak.20260905_204900:133:async def get_public_status_endpoint(request: Request): # CORRECTED: Removed `= Request(...)`
+src/web/app.py.bak.20260905_204900:144:    "/api/dashboard/summary",
+src/web/app.py.bak.20260905_204900:146:    summary="Get Authenticated Dashboard Summary",
+src/web/app.py.bak.20260905_204900:149:    description="Retrieves detailed bot status, user information, and trading data. Requires a valid authentication token."
+src/web/app.py.bak.20260905_204900:151:async def get_dashboard_summary_endpoint(
+src/web/app.py.bak.20260905_204900:156:    Fetches the main dashboard summary data. Requires authentication via `X-Auth-Token` header.
+src/web/app.py.bak.20260905_204900:160:    result = await dashboard_server.get_dashboard_summary(token=token, client_ip=client_ip)
+src/web/app.py.bak.20260905_204900:164:            status_code=401,
+src/web/app.py.bak.20260905_204900:175:                status_code=500,
+src/web/app.py.bak.20260905_204900:189:    summary="Update Bot State Parameter (Admin Only)",
+src/web/app.py.bak.20260905_204900:210:        status_code = 403
+src/web/app.py.bak.20260905_204900:213:            status_code = 401
+src/web/app.py.bak.20260905_204900:215:            status_code = 403
+src/web/app.py.bak.20260905_204900:217:            status_code = 500
+src/web/app.py.bak.20260905_204900:219:        raise HTTPException(status_code=status_code, detail={"message": error_message})
+src/web/app.py.bak.20260905_205136:4:Integrates DashboardServer for bot telemetry and control.
+src/web/app.py.bak.20260905_205136:13:import time # Added for timestamp in public status
+src/web/app.py.bak.20260905_205136:96:    """Response model for the public status endpoint."""
+src/web/app.py.bak.20260905_205136:99:    timestamp: float = Field(..., description="Unix timestamp of when the status was checked.")
+src/web/app.py.bak.20260905_205136:103:    status: str = Field(..., description="Current status of the bot (e.g., RUNNING, STOPPED, PAUSED, ERROR).")
+src/web/app.py.bak.20260905_205136:110:    """Comprehensive response model for the authenticated dashboard summary."""
+src/web/app.py.bak.20260905_205136:127:    "/api/public/status",
+src/web/app.py.bak.20260905_205136:129:    summary="Get Public System Status",
+src/web/app.py.bak.20260905_205136:131:    description="Provides a simple, unauthenticated health check for the AtriaTrade API service."
+src/web/app.py.bak.20260905_205136:133:async def get_public_status_endpoint(request: Request): # CORRECTED: Removed `= Request(...)`
+src/web/app.py.bak.20260905_205136:144:    "/api/dashboard/summary",
+src/web/app.py.bak.20260905_205136:146:    summary="Get Authenticated Dashboard Summary",
+src/web/app.py.bak.20260905_205136:149:    description="Retrieves detailed bot status, user information, and trading data. Requires a valid authentication token."
+src/web/app.py.bak.20260905_205136:151:async def get_dashboard_summary_endpoint(
+src/web/app.py.bak.20260905_205136:156:    Fetches the main dashboard summary data. Requires authentication via `X-Auth-Token` header.
+src/web/app.py.bak.20260905_205136:160:    result = await dashboard_server.get_dashboard_summary(token=token, client_ip=client_ip)
+src/web/app.py.bak.20260905_205136:164:            status_code=401,
+src/web/app.py.bak.20260905_205136:175:                status_code=500,
+src/web/app.py.bak.20260905_205136:189:    summary="Update Bot State Parameter (Admin Only)",
+src/web/app.py.bak.20260905_205136:210:        status_code = 403
+src/web/app.py.bak.20260905_205136:213:            status_code = 401
+src/web/app.py.bak.20260905_205136:215:            status_code = 403
+src/web/app.py.bak.20260905_205136:217:            status_code = 500
+src/web/app.py.bak.20260905_205136:219:        raise HTTPException(status_code=status_code, detail={"message": error_message})
+src/web/app.py.backup_before_ui_merge_20260905_210454:4:Integrates DashboardServer for bot telemetry and control.
+src/web/app.py.backup_before_ui_merge_20260905_210454:13:import time # Added for timestamp in public status
+src/web/app.py.backup_before_ui_merge_20260905_210454:96:    """Response model for the public status endpoint."""
+src/web/app.py.backup_before_ui_merge_20260905_210454:99:    timestamp: float = Field(..., description="Unix timestamp of when the status was checked.")
+src/web/app.py.backup_before_ui_merge_20260905_210454:103:    status: str = Field(..., description="Current status of the bot (e.g., RUNNING, STOPPED, PAUSED, ERROR).")
+src/web/app.py.backup_before_ui_merge_20260905_210454:110:    """Comprehensive response model for the authenticated dashboard summary."""
+src/web/app.py.backup_before_ui_merge_20260905_210454:127:    "/api/public/status",
+src/web/app.py.backup_before_ui_merge_20260905_210454:129:    summary="Get Public System Status",
+src/web/app.py.backup_before_ui_merge_20260905_210454:131:    description="Provides a simple, unauthenticated health check for the AtriaTrade API service."
+src/web/app.py.backup_before_ui_merge_20260905_210454:133:async def get_public_status_endpoint(request: Request): # CORRECTED: Removed `= Request(...)`
+src/web/app.py.backup_before_ui_merge_20260905_210454:144:    "/api/dashboard/summary",
+src/web/app.py.backup_before_ui_merge_20260905_210454:146:    summary="Get Authenticated Dashboard Summary",
+src/web/app.py.backup_before_ui_merge_20260905_210454:149:    description="Retrieves detailed bot status, user information, and trading data. Requires a valid authentication token."
+src/web/app.py.backup_before_ui_merge_20260905_210454:151:async def get_dashboard_summary_endpoint(
+src/web/app.py.backup_before_ui_merge_20260905_210454:156:    Fetches the main dashboard summary data. Requires authentication via `X-Auth-Token` header.
+src/web/app.py.backup_before_ui_merge_20260905_210454:160:    result = await dashboard_server.get_dashboard_summary(token=token, client_ip=client_ip)
+src/web/app.py.backup_before_ui_merge_20260905_210454:164:            status_code=401,
+src/web/app.py.backup_before_ui_merge_20260905_210454:175:                status_code=500,
+src/web/app.py.backup_before_ui_merge_20260905_210454:189:    summary="Update Bot State Parameter (Admin Only)",
+src/web/app.py.backup_before_ui_merge_20260905_210454:210:        status_code = 403
+src/web/app.py.backup_before_ui_merge_20260905_210454:213:            status_code = 401
+src/web/app.py.backup_before_ui_merge_20260905_210454:215:            status_code = 403
+src/web/app.py.backup_before_ui_merge_20260905_210454:217:            status_code = 500
+src/web/app.py.backup_before_ui_merge_20260905_210454:219:        raise HTTPException(status_code=status_code, detail={"message": error_message})
+src/web/app.py.backup_before_ui_merge_20260905_211158:4:Integrates DashboardServer for bot telemetry and control.
+src/web/app.py.backup_before_ui_merge_20260905_211158:13:import time # Added for timestamp in public status
+src/web/app.py.backup_before_ui_merge_20260905_211158:96:    """Response model for the public status endpoint."""
+src/web/app.py.backup_before_ui_merge_20260905_211158:99:    timestamp: float = Field(..., description="Unix timestamp of when the status was checked.")
+src/web/app.py.backup_before_ui_merge_20260905_211158:103:    status: str = Field(..., description="Current status of the bot (e.g., RUNNING, STOPPED, PAUSED, ERROR).")
+src/web/app.py.backup_before_ui_merge_20260905_211158:110:    """Comprehensive response model for the authenticated dashboard summary."""
+src/web/app.py.backup_before_ui_merge_20260905_211158:127:    "/api/public/status",
+src/web/app.py.backup_before_ui_merge_20260905_211158:129:    summary="Get Public System Status",
+src/web/app.py.backup_before_ui_merge_20260905_211158:131:    description="Provides a simple, unauthenticated health check for the AtriaTrade API service."
+src/web/app.py.backup_before_ui_merge_20260905_211158:133:async def get_public_status_endpoint(request: Request): # CORRECTED: Removed `= Request(...)`
+src/web/app.py.backup_before_ui_merge_20260905_211158:144:    "/api/dashboard/summary",
+src/web/app.py.backup_before_ui_merge_20260905_211158:146:    summary="Get Authenticated Dashboard Summary",
+src/web/app.py.backup_before_ui_merge_20260905_211158:149:    description="Retrieves detailed bot status, user information, and trading data. Requires a valid authentication token."
+src/web/app.py.backup_before_ui_merge_20260905_211158:151:async def get_dashboard_summary_endpoint(
+src/web/app.py.backup_before_ui_merge_20260905_211158:156:    Fetches the main dashboard summary data. Requires authentication via `X-Auth-Token` header.
+src/web/app.py.backup_before_ui_merge_20260905_211158:160:    result = await dashboard_server.get_dashboard_summary(token=token, client_ip=client_ip)
+src/web/app.py.backup_before_ui_merge_20260905_211158:164:            status_code=401,
+src/web/app.py.backup_before_ui_merge_20260905_211158:175:                status_code=500,
+src/web/app.py.backup_before_ui_merge_20260905_211158:189:    summary="Update Bot State Parameter (Admin Only)",
+src/web/app.py.backup_before_ui_merge_20260905_211158:210:        status_code = 403
+src/web/app.py.backup_before_ui_merge_20260905_211158:213:            status_code = 401
+src/web/app.py.backup_before_ui_merge_20260905_211158:215:            status_code = 403
+src/web/app.py.backup_before_ui_merge_20260905_211158:217:            status_code = 500
+src/web/app.py.backup_before_ui_merge_20260905_211158:219:        raise HTTPException(status_code=status_code, detail={"message": error_message})
+src/market/market_fetcher.py:45:            "status": "mock_live"
+src/market/market_fetcher.py:50:            "status": "online",

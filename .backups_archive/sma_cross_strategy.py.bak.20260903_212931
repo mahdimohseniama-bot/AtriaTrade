@@ -1,0 +1,135 @@
+from typing import Dict, Any, Optional, List, Union
+
+
+class SMACrossStrategy:
+    """
+    استراتژی تقاطع میانگین متحرک ساده (SMA Cross).
+    طراحی‌شده برای حالت شبیه‌سازی و Paper Trading بدون ریسک واقعی.
+    """
+
+    def __init__(
+        self,
+        engine=None,
+        short_window: int = 5,
+        long_window: int = 20,
+        symbol: str = "BTCUSDT",
+        quantity: float = 0.001,
+        take_profit_pct: Optional[float] = None,
+        stop_loss_pct: Optional[float] = None,
+        **kwargs,
+    ):
+        self.engine = engine
+        self.short_window = int(short_window)
+        self.long_window = int(long_window)
+        self.symbol = str(symbol).upper()
+        self.quantity = float(quantity)
+        self.take_profit_pct = float(take_profit_pct) if take_profit_pct is not None else None
+        self.stop_loss_pct = float(stop_loss_pct) if stop_loss_pct is not None else None
+
+        self.prices: List[float] = []
+        self.name = self.__class__.__name__
+
+    def add_price(self, price: Union[float, int, List[Union[float, int]]]) -> None:
+        """اضافه کردن قیمت یا لیستی از قیمت‌ها به حافظه تاریخی"""
+        if isinstance(price, (list, tuple)):
+            for p in price:
+                self.add_price(p)
+            return
+
+        try:
+            val = float(price)
+            if val > 0:
+                self.prices.append(val)
+                # نگه داشتن حداکثر دو برابر پنجره بلندمدت برای صرفه‌جویی در حافظه
+                max_len = max(self.long_window * 3, 100)
+                if len(self.prices) > max_len:
+                    self.prices = self.prices[-max_len:]
+        except (ValueError, TypeError):
+            pass
+
+    def calculate_sma(self, window: int) -> Optional[float]:
+        """محاسبه میانگین متحرک ساده"""
+        if len(self.prices) < window or window <= 0:
+            return None
+        subset = self.prices[-window:]
+        return sum(subset) / float(window)
+
+    def _get_position(self) -> float:
+        """بررسی موقعیت فعلی در پورتفولیو موتور"""
+        if not self.engine:
+            return 0.0
+        portfolio = getattr(self.engine, "portfolio", None)
+        if isinstance(portfolio, dict):
+            return float(portfolio.get(self.symbol, 0.0))
+        return 0.0
+
+    def generate_signal(self, current_price: Optional[Union[float, List[float]]] = None) -> Optional[Dict[str, Any]]:
+        """تولید سیگنال خرید، فروش یا نگهداری"""
+        if current_price is not None:
+            self.add_price(current_price)
+
+        if len(self.prices) < self.long_window:
+            return None
+
+        short_sma = self.calculate_sma(self.short_window)
+        long_sma = self.calculate_sma(self.long_window)
+
+        if short_sma is None or long_sma is None:
+            return None
+
+        current_position = self._get_position()
+        latest_price = self.prices[-1]
+
+        # سیگنال خرید (Golden Cross)
+        if short_sma > long_sma and current_position <= 0:
+            return {
+                "symbol": self.symbol,
+                "side": "BUY",
+                "action": "BUY",
+                "quantity": self.quantity,
+                "qty": self.quantity,
+                "price": latest_price,
+                "strategy": self.name,
+            }
+
+        # سیگنال فروش (Death Cross)
+        elif short_sma < long_sma and current_position > 0:
+            return {
+                "symbol": self.symbol,
+                "side": "SELL",
+                "action": "SELL",
+                "quantity": current_position,
+                "qty": current_position,
+                "price": latest_price,
+                "strategy": self.name,
+            }
+
+        return None
+
+    def on_tick(self, tick_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """پردازش هر تیک دریافتی از بازار"""
+        if not isinstance(tick_data, dict):
+            return None
+
+        symbol = tick_data.get("symbol", self.symbol)
+        if symbol != self.symbol:
+            return None
+
+        price = tick_data.get("price") or tick_data.get("close")
+        if price is None:
+            return None
+
+        try:
+            price_val = float(price)
+            if price_val <= 0:
+                return None
+        except (ValueError, TypeError):
+            return None
+
+        self.add_price(price_val)
+        signal = self.generate_signal()
+
+        if signal and self.engine and hasattr(self.engine, "handle_strategy_signal"):
+            return self.engine.handle_strategy_signal(self.name, signal)
+
+        return signal

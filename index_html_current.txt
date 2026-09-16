@@ -1,0 +1,34 @@
+     1	<!DOCTYPE html>
+     2	<html lang="fa" dir="rtl">
+     3	<head>
+     4	    <meta charset="UTF-8">
+     5	    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+     6	    <title>AtriaTrade Dashboard</title>
+     7	    <script src="https://cdn.tailwindcss.com"></script>
+     8	    <style>body { background-color: #0f172a; color: #f8fafc; font-family: Tahoma, sans-serif; }</style>
+     9	</head>
+    10	<body class="p-6">
+    11	    <div class="max-w-4xl mx-auto">
+    12	        <header class="flex justify-between items-center border-b border-gray-700 pb-4 mb-6">
+    13	            <div>
+    14	                <h1 class="text-3xl font-bold text-blue-400">AtriaTrade</h1>
+    15	                <p class="text-sm text-gray-400 mt-1">Dashboard</p>
+    16	            </div>
+    17	            <div class="bg-green-900 text-green-300 px-4 py-2 rounded-lg text-sm font-bold border border-green-700">🟢 {{ status }}</div>
+    18	        </header>
+    19	        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+    20	            <div class="bg-gray-800 p-5 rounded-xl border border-gray-700">
+    21	                <h2 class="text-xl mb-3 border-b border-gray-600 pb-2">وضعیت سیستم</h2>
+    22	                <p id="health-status" class="text-gray-400">در حال اتصال...</p>
+    23	            </div>
+    24	        </div>
+    25	    </div>
+    26	    <script>
+    27	        fetch('/health').then(res => res.json()).then(data => {
+    28	            document.getElementById('health-status').innerHTML = `وضعیت API: <span class="text-green-400">متصل</span><br>حالت: ${data.mode}`;
+    29	        }).catch(() => {
+    30	            document.getElementById('health-status').innerHTML = '<span class="text-red-500">خطا در ارتباط</span>';
+    31	        });
+    32	    </script>
+    33	</body>
+    34	</html>

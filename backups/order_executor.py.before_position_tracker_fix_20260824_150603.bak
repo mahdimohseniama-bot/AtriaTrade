@@ -1,0 +1,145 @@
+"""AtriaTrade - Order Executor Engine
+
+این ماژول فقط برای Paper Trading، Backtesting و Testnet طراحی شده است.
+هیچ معامله واقعی یا برداشت/واریز خودکار در این ماژول انجام نمی‌شود.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional
+
+from src.core.order_manager import (
+    Order,
+    OrderManager,
+    OrderSide,
+    OrderStatus,
+    OrderType,
+)
+from src.core.position_tracker import PositionTracker
+from src.core.risk_manager import RiskManager
+
+
+class OrderExecutor:
+    """مجری مدیریت و اجرای سفارش‌ها با اعتبارسنجی ریسک و موقعیت‌ها."""
+
+    def __init__(
+        self,
+        order_manager: Optional[OrderManager] = None,
+        position_tracker: Optional[PositionTracker] = None,
+        risk_manager: Optional[RiskManager] = None,
+        **kwargs: Any,
+    ):
+        self.order_manager = order_manager or OrderManager()
+        self.position_tracker = position_tracker or PositionTracker()
+        self.risk_manager = risk_manager or RiskManager()
+
+    def execute_market_order(
+        self,
+        symbol: str,
+        side: OrderSide | str,
+        quantity: float,
+        price: float,
+        stop_loss: Optional[float] = None,
+        take_profit: Optional[float] = None,
+    ) -> Order:
+        """بررسی ریسک و اجرای آنی سفارش Market."""
+        # نرمال‌سازی نوع OrderSide
+        if isinstance(side, str):
+            side_enum = OrderSide(side.upper())
+        else:
+            side_enum = side
+
+        # اعتبارسنجی ریسک؛ در صورت نقض قانون، استثنا پرتاب می‌شود
+        self.risk_manager.validate_order(
+            quantity=quantity,
+            price=price,
+            stop_loss=stop_loss,
+            side=side_enum.value,
+            symbol=symbol,
+        )
+
+        # ساخت و ثبت سفارش در OrderManager
+        order = self.order_manager.create_order(
+            symbol=symbol,
+            side=side_enum,
+            order_type=OrderType.MARKET,
+            quantity=quantity,
+            price=price,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
+        )
+
+        # اجرای سفارش و به‌روزرسانی پوزیشن
+        order.status = OrderStatus.FILLED
+        order.executed_price = price
+        order.executed_quantity = quantity
+
+        # ثبت در پوزیشن‌ترکر
+        self.position_tracker.update_position(
+            symbol=symbol,
+            side=side_enum.value,
+            quantity=quantity,
+            price=price,
+        )
+
+        return order
+
+    def place_limit_order(
+        self,
+        symbol: str,
+        side: OrderSide | str,
+        quantity: float,
+        price: float,
+        stop_loss: Optional[float] = None,
+        take_profit: Optional[float] = None,
+    ) -> Order:
+        """بررسی ریسک و ثبت سفارش Limit در وضعیت PENDING."""
+        if isinstance(side, str):
+            side_enum = OrderSide(side.upper())
+        else:
+            side_enum = side
+
+        self.risk_manager.validate_order(
+            quantity=quantity,
+            price=price,
+            stop_loss=stop_loss,
+            side=side_enum.value,
+            symbol=symbol,
+        )
+
+        order = self.order_manager.create_order(
+            symbol=symbol,
+            side=side_enum,
+            order_type=OrderType.LIMIT,
+            quantity=quantity,
+            price=price,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
+        )
+        return order
+
+    def execute_limit_order(self, order_id: str, execution_price: float) -> Order:
+        """پر کردن سفارش Limit از قبل ثبت‌شده."""
+        order = self.order_manager.get_order(order_id)
+        if not order:
+            raise ValueError(f"Order with id {order_id} not found")
+
+        order.status = OrderStatus.FILLED
+        order.executed_price = execution_price
+        order.executed_quantity = order.quantity
+
+        self.position_tracker.update_position(
+            symbol=order.symbol,
+            side=order.side.value if hasattr(order.side, "value") else str(order.side),
+            quantity=order.quantity,
+            price=execution_price,
+        )
+        return order
+
+    def cancel_order(self, order_id: str) -> Order:
+        """لغو سفارش در صف انتظار."""
+        order = self.order_manager.get_order(order_id)
+        if not order:
+            raise ValueError(f"Order with id {order_id} not found")
+        order.status = OrderStatus.CANCELLED
+        return order

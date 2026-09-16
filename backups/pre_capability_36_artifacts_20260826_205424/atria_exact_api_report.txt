@@ -1,0 +1,608 @@
+========== TESTS: exact required APIs ==========
+
+######## tests/test_order_manager.py ########
+     1	from src.core.order_manager import OrderManager
+     2	
+     3	
+     4	def test_order_lifecycle():
+     5	    print("[1] Creating OrderManager...")
+     6	    manager = OrderManager()
+     7	
+     8	    print("[2] Creating LIMIT BUY order...")
+     9	    order = manager.create_order(
+    10	        symbol="BTCUSDT",
+    11	        side="BUY",
+    12	        order_type="LIMIT",
+    13	        quantity=0.1,
+    14	        price=50000.0,
+    15	    )
+    16	
+    17	    assert order["symbol"] == "BTCUSDT"
+    18	    assert order["side"] == "BUY"
+    19	    assert order["order_type"] == "LIMIT"
+    20	    assert order["quantity"] == 0.1
+    21	    assert order["price"] == 50000.0
+    22	    assert order["status"] == "OPEN"
+    23	    print("-> Order created successfully.")
+    24	
+    25	    print("[3] Checking open orders...")
+    26	    open_orders = manager.list_open_orders("BTCUSDT")
+    27	
+    28	    assert len(open_orders) == 1
+    29	    assert open_orders[0]["order_id"] == order["order_id"]
+    30	    assert manager.get_order_status(order["order_id"]) == "OPEN"
+    31	    print("-> Open order status validated.")
+    32	
+    33	    print("[4] Testing duplicate order protection...")
+    34	    try:
+    35	        manager.create_order(
+    36	            symbol="BTCUSDT",
+    37	            side="BUY",
+    38	            order_type="LIMIT",
+    39	            quantity=0.1,
+    40	            price=50000.0,
+    41	        )
+    42	        raise AssertionError("Duplicate order was not rejected.")
+    43	    except ValueError as error:
+    44	        assert "identical" in str(error).lower()
+    45	
+    46	    print("-> Duplicate order rejected successfully.")
+    47	
+    48	    print("[5] Filling order...")
+    49	    filled_order = manager.fill_order(
+    50	        order["order_id"],
+    51	        fill_price=50100.0,
+    52	    )
+    53	
+    54	    assert filled_order["status"] == "FILLED"
+    55	    assert filled_order["fill_price"] == 50100.0
+    56	    assert manager.list_open_orders("BTCUSDT") == []
+    57	    print("-> Order filled successfully.")
+    58	
+    59	    print("[6] Creating and cancelling another order...")
+    60	    second_order = manager.create_order(
+    61	        symbol="ETHUSDT",
+    62	        side="SELL",
+    63	        order_type="LIMIT",
+    64	        quantity=1.0,
+    65	        price=3000.0,
+    66	    )
+    67	
+    68	    cancelled_order = manager.cancel_order(second_order["order_id"])
+    69	
+    70	    assert cancelled_order["status"] == "CANCELLED"
+    71	    assert manager.get_order_status(second_order["order_id"]) == "CANCELLED"
+    72	    print("-> Order cancelled successfully.")
+    73	
+    74	    print("=== ORDER MANAGER TEST PASSED ===")
+    75	
+    76	
+    77	def test_order_validation():
+    78	    manager = OrderManager()
+    79	
+    80	    invalid_cases = [
+    81	        {
+    82	            "symbol": "BTCUSDT",
+    83	            "side": "INVALID",
+    84	            "order_type": "MARKET",
+    85	            "quantity": 1.0,
+    86	        },
+    87	        {
+    88	            "symbol": "BTCUSDT",
+    89	            "side": "BUY",
+    90	            "order_type": "LIMIT",
+    91	            "quantity": 1.0,
+    92	        },
+    93	        {
+    94	            "symbol": "BTCUSDT",
+    95	            "side": "BUY",
+    96	            "order_type": "MARKET",
+    97	            "quantity": 0,
+    98	        },
+    99	    ]
+   100	
+   101	    for case in invalid_cases:
+   102	        try:
+   103	            manager.create_order(**case)
+   104	            raise AssertionError("Invalid order was accepted.")
+   105	        except ValueError:
+   106	            pass
+   107	
+   108	    print("=== ORDER VALIDATION TEST PASSED ===")
+   109	
+   110	
+   111	if __name__ == "__main__":
+   112	    test_order_lifecycle()
+   113	    test_order_validation()
+
+######## tests/test_order_executor.py ########
+     1	from src.core.order_executor import OrderExecutor
+     2	
+     3	
+     4	def test_market_execution_flow():
+     5	    print("[1] Initializing OrderExecutor...")
+     6	    executor = OrderExecutor()
+     7	
+     8	    print("[2] Executing MARKET BUY order...")
+     9	    result = executor.place_and_execute_market_order(
+    10	        symbol="BTCUSDT",
+    11	        side="BUY",
+    12	        quantity=0.2,
+    13	        current_price=50000.0,
+    14	        sl=49000.0,
+    15	        tp=52000.0,
+    16	    )
+    17	
+    18	    assert result["order"]["status"] == "FILLED"
+    19	    assert result["position"]["symbol"] == "BTCUSDT"
+    20	    assert result["position"]["entry_price"] == 50000.0
+    21	    assert result["position"]["size"] == 0.2
+    22	    assert executor.position_tracker.get_position("BTCUSDT") is not None
+    23	    print("-> Market order executed and position tracked successfully.")
+    24	
+    25	    print("=== MARKET EXECUTION TEST PASSED ===")
+    26	
+    27	
+    28	def test_limit_order_trigger_flow():
+    29	    print("[3] Testing LIMIT order triggering...")
+    30	    executor = OrderExecutor()
+    31	
+    32	    # ثبت سفارش لیمیت خرید پایین‌تر از قیمت بازار
+    33	    order = executor.order_manager.create_order(
+    34	        symbol="ETHUSDT",
+    35	        side="BUY",
+    36	        order_type="LIMIT",
+    37	        quantity=1.5,
+    38	        price=2900.0,
+    39	    )
+    40	    assert order["status"] == "OPEN"
+    41	
+    42	    # قیمت جاری بالاتر است -> نباید Fill شود
+    43	    executions = executor.evaluate_limit_orders("ETHUSDT", current_price=3000.0)
+    44	    assert len(executions) == 0
+    45	    assert executor.order_manager.get_order_status(order["order_id"]) == "OPEN"
+    46	
+    47	    # قیمت افت می‌کند و به تارگت لیمیت می‌رسد -> باید Fill شود
+    48	    executions = executor.evaluate_limit_orders("ETHUSDT", current_price=2890.0)
+    49	    assert len(executions) == 1
+    50	    assert executions[0]["order"]["status"] == "FILLED"
+    51	    assert executor.position_tracker.get_position("ETHUSDT") is not None
+    52	    print("-> Limit order evaluated and triggered successfully.")
+    53	
+    54	    print("=== LIMIT EXECUTION TEST PASSED ===")
+    55	
+    56	
+    57	if __name__ == "__main__":
+    58	    test_market_execution_flow()
+    59	    test_limit_order_trigger_flow()
+
+######## tests/test_position_tracker.py ########
+     1	from src.core.position_tracker import PositionTracker
+     2	
+     3	
+     4	def test_position_lifecycle():
+     5	    print("[1] Initializing PositionTracker...")
+     6	    tracker = PositionTracker()
+     7	
+     8	    print("[2] Opening Long position for BTCUSDT with SL and TP...")
+     9	    pos = tracker.open_position(
+    10	        symbol="BTCUSDT",
+    11	        side="LONG",
+    12	        entry_price=50000.0,
+    13	        size=0.1,
+    14	        sl=49000.0,
+    15	        tp=53000.0,
+    16	    )
+    17	    assert pos["symbol"] == "BTCUSDT"
+    18	    assert tracker.get_position("BTCUSDT") is not None
+    19	    print("-> Position opened successfully.")
+    20	
+    21	    print("[3] Testing SL / TP triggers...")
+    22	    assert tracker.check_sl_tp("BTCUSDT", 51000.0) is None
+    23	    assert tracker.check_sl_tp("BTCUSDT", 48900.0) == "SL"
+    24	    assert tracker.check_sl_tp("BTCUSDT", 53500.0) == "TP"
+    25	    print("-> SL/TP logic validated.")
+    26	
+    27	    print("[4] Closing position...")
+    28	    closed_pos = tracker.close_position("BTCUSDT", exit_price=52000.0)
+    29	    assert closed_pos["exit_price"] == 52000.0
+    30	    assert tracker.get_position("BTCUSDT") is None
+    31	    print("-> Position closed successfully.")
+    32	
+    33	    print("=== POSITION TRACKER TEST PASSED ===")
+    34	
+    35	
+    36	if __name__ == "__main__":
+    37	    test_position_lifecycle()
+
+######## tests/test_paper_session.py ########
+     1	import os
+     2	import json
+     3	from src.core.risk_manager import RiskConfig
+     4	from src.core.paper_session import PaperSession
+     5	
+     6	def test_paper_session_lifecycle():
+     7	    print("[1] Initializing Paper Trading Session...")
+     8	    config = RiskConfig(
+     9	        risk_per_trade_pct=1.0,
+    10	        stop_loss_pct=1.5,
+    11	        take_profit_pct=3.0,
+    12	        min_trade_value=10.0
+    13	    )
+    14	    session = PaperSession(
+    15	        session_name="test_run",
+    16	        initial_capital=10000.0,
+    17	        risk_config=config,
+    18	        data_dir="data/paper_trades"
+    19	    )
+    20	
+    21	    print("[2] Executing Winning Trade (BTC @ 50,000 -> 51,500)...")
+    22	    res1 = session.execute_paper_trade(
+    23	        symbol="BTC/USDT",
+    24	        side="buy",
+    25	        entry_price=50000.0,
+    26	        exit_price=51500.0
+    27	    )
+    28	    assert res1["status"] == "CLOSED", "Trade 1 should be closed successfully"
+    29	    assert res1["pnl"] > 0, "Trade 1 must be profitable"
+    30	    print(f"-> Trade 1 PNL: {res1['pnl']:.2f}")
+    31	
+    32	    print("[3] Executing Losing Trade (ETH @ 3,000 -> 2,900)...")
+    33	    res2 = session.execute_paper_trade(
+    34	        symbol="ETH/USDT",
+    35	        side="buy",
+    36	        entry_price=3000.0,
+    37	        exit_price=2900.0
+    38	    )
+    39	    assert res2["status"] == "CLOSED", "Trade 2 should be closed successfully"
+    40	    assert res2["pnl"] < 0, "Trade 2 must have a loss"
+    41	    print(f"-> Trade 2 PNL: {res2['pnl']:.2f}")
+    42	
+    43	    print("[4] Validating Session Stats...")
+    44	    stats = session.get_session_stats()
+    45	    print(f"Total Trades: {stats['total_trades']}, Win Rate: {stats['win_rate_pct']}%")
+    46	    assert stats["total_trades"] == 2
+    47	    assert stats["win_rate_pct"] == 50.0
+    48	
+    49	    print("[5] Validating JSON persistence...")
+    50	    json_path = "data/paper_trades/test_run.json"
+    51	    assert os.path.exists(json_path), "JSON history file must exist"
+    52	    with open(json_path, "r", encoding="utf-8") as f:
+    53	        data = json.load(f)
+    54	        assert len(data["trades"]) == 2
+    55	    print("-> JSON file verified successfully.")
+    56	
+    57	    print("\n=== PAPER SESSION TEST PASSED ===")
+    58	
+    59	if __name__ == "__main__":
+    60	    test_paper_session_lifecycle()
+
+######## tests/test_integrated_pipeline.py ########
+     1	"""
+     2	Tests for IntegratedTradingPipeline - AtriaTrade
+     3	"""
+     4	
+     5	import sys
+     6	from pathlib import Path
+     7	
+     8	PROJECT_ROOT = Path(__file__).resolve().parent.parent
+     9	if str(PROJECT_ROOT) not in sys.path:
+    10	    sys.path.insert(0, str(PROJECT_ROOT))
+    11	
+    12	from src.core.integrated_pipeline import IntegratedTradingPipeline
+    13	
+    14	
+    15	def test_pipeline_initialization():
+    16	    pipeline = IntegratedTradingPipeline(initial_cash=10000.0, mode="paper")
+    17	    status = pipeline.get_full_status()
+    18	
+    19	    assert status["mode"] == "paper"
+    20	    assert status["equity"] == 10000.0
+    21	    assert status["real_trading_enabled"] is False
+    22	    assert status["order_submitted"] is False
+    23	    print("PASS: test_pipeline_initialization")
+    24	
+    25	
+    26	def test_integrated_buy_and_sell_flow():
+    27	    def dummy_strategy(data):
+    28	        return {"action": data.get("action", "HOLD"), "confidence": 0.95}
+    29	
+    30	    pipeline = IntegratedTradingPipeline(
+    31	        initial_cash=10000.0,
+    32	        fee_pct=0.1,
+    33	        mode="paper",
+    34	        strategy_callback=dummy_strategy,
+    35	    )
+    36	
+    37	    # 1. Execute BUY
+    38	    buy_res = pipeline.process_tick(
+    39	        symbol="BTCUSDT",
+    40	        price=50000.0,
+    41	        quantity=0.1,
+    42	        strategy_signal="BUY",
+    43	    )
+    44	    assert buy_res["action"] == "BUY"
+    45	    assert buy_res["execution"]["status"] == "filled"
+    46	    assert buy_res["order_submitted"] is False
+    47	    assert pipeline.simulator.positions.get("BTCUSDT", 0.0) == 0.1
+    48	
+    49	    # 2. Execute SELL with profit
+    50	    sell_res = pipeline.process_tick(
+    51	        symbol="BTCUSDT",
+    52	        price=55000.0,
+    53	        quantity=0.1,
+    54	        strategy_signal="SELL",
+    55	    )
+    56	    assert sell_res["action"] == "SELL"
+    57	    assert sell_res["execution"]["status"] == "filled"
+    58	    assert sell_res["execution"]["realized_pnl"] > 0
+    59	    assert pipeline.simulator.positions.get("BTCUSDT", 0.0) == 0.0
+    60	
+    61	    print("PASS: test_integrated_buy_and_sell_flow")
+    62	
+    63	
+    64	def test_emergency_circuit_breaker_blocks_trading():
+    65	    def dummy_strategy(data):
+    66	        return {"action": "BUY", "confidence": 0.9}
+    67	
+    68	    pipeline = IntegratedTradingPipeline(
+    69	        initial_cash=10000.0,
+    70	        mode="paper",
+    71	        strategy_callback=dummy_strategy,
+    72	    )
+    73	
+    74	    # Trigger emergency breaker
+    75	    pipeline.recovery_manager.activate_emergency_stop("Safety trigger test")
+    76	
+    77	    res = pipeline.process_tick(
+    78	        symbol="ETHUSDT",
+    79	        price=2000.0,
+    80	        quantity=1.0,
+    81	        strategy_signal="BUY",
+    82	    )
+    83	
+    84	    assert res["action"] == "HOLD"
+    85	    assert res["order_submitted"] is False
+    86	    assert pipeline.simulator.trade_count == 0
+    87	
+    88	    print("PASS: test_emergency_circuit_breaker_blocks_trading")
+    89	
+    90	
+    91	def test_hold_decision_leaves_state_clean():
+    92	    pipeline = IntegratedTradingPipeline(initial_cash=5000.0, mode="paper")
+    93	
+    94	    res = pipeline.process_tick(
+    95	        symbol="SOLUSDT",
+    96	        price=100.0,
+    97	        quantity=1.0,
+    98	        strategy_signal="HOLD",
+    99	    )
+   100	
+   101	    assert res["action"] == "HOLD"
+   102	    assert pipeline.simulator.trade_count == 0
+   103	    assert pipeline.simulator.cash == 5000.0
+   104	
+   105	    print("PASS: test_hold_decision_leaves_state_clean")
+   106	
+   107	
+   108	if __name__ == "__main__":
+   109	    print("START: IntegratedTradingPipeline Tests")
+   110	
+   111	    test_pipeline_initialization()
+   112	    test_integrated_buy_and_sell_flow()
+   113	    test_emergency_circuit_breaker_blocks_trading()
+   114	    test_hold_decision_leaves_state_clean()
+   115	
+   116	    print("ALL IntegratedTradingPipeline TESTS PASSED SUCCESSFULLY!")
+
+========== CURRENT CLASS / METHOD SIGNATURES ==========
+
+######## src/core/order_manager.py ########
+10:class OrderSide(str, Enum):
+15:class OrderType(str, Enum):
+21:class OrderStatus(str, Enum):
+28:class Order:
+29:    def __init__(
+50:    def to_dict(self) -> Dict[str, Any]:
+64:    def __getitem__(self, key: str) -> Any:
+67:    def __setitem__(self, key: str, value: Any):
+71:    def get(self, key: str, default: Any = None) -> Any:
+75:class OrderManager:
+76:    def __init__(self):
+80:    def create_order(
+107:    def update_order_status(
+124:    def get_order(self, order_id: str) -> Optional[Order]:
+132:    def get_open_orders(self) -> List[Order]:
+138:def _compat_enum_value(value):
+141:def _compat_create_order(
+
+######## src/core/order_executor.py ########
+22:class PositionDict(dict):
+25:    def __getattr__(self, name: str) -> Any:
+31:    def __setattr__(self, name: str, value: Any) -> None:
+35:def _install_order_compatibility() -> None:
+41:    def compatible_getitem(self: Order, key: str) -> Any:
+81:class OrderExecutor:
+84:    def __init__(
+96:    def _normalize_side(side: OrderSide | str) -> OrderSide:
+106:    def _set_order_fields(
+116:    def _validate_order(self, *args, **kwargs) -> None:
+178:    def _create_order(
+209:    def _find_order(self, order_id: Any) -> Order:
+216:    def _record_position(self, symbol: str, side: OrderSide, quantity: float, price: float) -> Any:
+269:    def place_and_execute_market_order(self, *args, **kwargs):
+273:    def execute_market_order(
+291:    def execute_order(
+306:    def place_limit_order(
+323:    def process_limit_order(
+355:    def execute_limit_order(
+377:    def fill_limit_order(
+385:    def cancel_order(self, order_id: Any) -> Order:
+391:def _compat_as_dict(item):
+394:def _compat_place_and_execute_market_order(
+429:def _compat_process_limit_orders(self, current_market_prices):
+
+######## src/core/position_tracker.py ########
+9:class Position:
+10:    def __init__(self, position_id: str, symbol: str, side: str, size: float, entry_price: float):
+23:    def update_price(self, current_price: float):
+30:    def close(self, exit_price: float) -> float:
+38:    def to_dict(self) -> Dict[str, Any]:
+53:    def __getitem__(self, key: str) -> Any:
+57:class PositionTracker:
+58:    def __init__(self):
+62:    def open_position(self, *args, **kwargs) -> Position:
+96:    def close_position(self, position_id: str, exit_price: float) -> Optional[Dict[str, Any]]:
+104:    def update_prices(self, price_map: Dict[str, float]):
+109:    def get_open_positions(self) -> List[Dict[str, Any]]:
+112:    def get_total_unrealized_pnl(self) -> float:
+115:    def get_position(self, position_id: str) -> Optional[Position]:
+121:def _compat_position_to_dict(self):
+129:def _compat_quantity(self):
+133:def _compat_quantity(self, value):
+141:def _compat_open_position(self, *args, **kwargs):
+148:def _compat_update_position(
+171:def _compat_get_position(self, key):
+
+######## src/core/paper_session.py ########
+9:class PaperSession:
+20:    def __init__(
+49:    def _now() -> str:
+53:    def balance(self) -> float:
+57:    def update_capital_after_trade(self, pnl: float) -> float:
+67:    def record_trade(
+135:    def to_dict(self) -> Dict[str, Any]:
+151:    def save(self, file_path: str | Path) -> Path:
+166:    def from_dict(cls, data: Dict[str, Any]) -> "PaperSession":
+188:    def load(cls, file_path: str | Path) -> "PaperSession":
+200:    def summary(self) -> Dict[str, Any]:
+218:    def __repr__(self) -> str:
+230:class PaperTradingSession(PaperSession):
+233:    def __init__(self, initial_balance=10000.0, risk_config=None, **kwargs):
+251:    def get_balance(self):
+254:    def update_market_prices(self, prices):
+262:    def get_equity(self):
+291:    def execute_order(
+
+######## src/core/integrated_pipeline.py ########
+25:class IntegratedTradingPipeline:
+30:    def __init__(
+68:    def _timestamp() -> str:
+71:    def process_tick(
+180:    def get_full_status(self, current_prices: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
+200:def _compat_pipeline_step(self, market_data):
+
+######## src/core/risk_manager.py ########
+7:class RiskConfig:
+8:    def __init__(
+30:    def max_risk_percent(self) -> float:
+34:class RiskManager:
+35:    def __init__(
+160:    def _side(side: Optional[str]) -> str:
+163:    def _ensure_current_day(self) -> None:
+168:    def record_daily_loss(self, loss: float) -> float:
+173:    def get_today_loss(self) -> float:
+177:    def get_daily_loss(self) -> float:
+180:    def reset_daily_loss(self) -> None:
+184:    def get_max_daily_loss(self) -> float:
+187:    def can_trade_today(self) -> bool:
+190:    def max_position_value(self) -> float:
+193:    def max_risk_value(self) -> float:
+196:    def validate_daily_risk(
+210:    def calculate_levels(
+275:    def calculate_position_size(
+349:    def validate_order(
+386:    def check_order_risk(
+398:    def can_open_position(
+411:    def get_risk_summary(self) -> Dict[str, Any]:
+426:def _compat_riskconfig_init(self, *args, **kwargs):
+
+========== ALL COMPATIBILITY PATCH LINES ==========
+src/core/risk_manager.py:421:# === AtriaTrade REAL compatibility patch: baseline-7 ===
+src/core/risk_manager.py:422:import inspect as _compat_inspect
+src/core/risk_manager.py:426:def _compat_riskconfig_init(self, *args, **kwargs):
+src/core/risk_manager.py:441:    signature = _compat_inspect.signature(_original_riskconfig_init)
+src/core/risk_manager.py:472:RiskConfig.__init__ = _compat_riskconfig_init
+src/core/paper_session.py:227:# Legacy alias removed: PaperTradingSession is defined below as a subclass.
+src/core/paper_session.py:229:# === AtriaTrade REAL compatibility patch: baseline-7 ===
+src/core/paper_session.py:230:class PaperTradingSession(PaperSession):
+src/core/position_tracker.py:118:# === AtriaTrade REAL compatibility patch: baseline-7 ===
+src/core/position_tracker.py:121:def _compat_position_to_dict(self):
+src/core/position_tracker.py:126:Position.to_dict = _compat_position_to_dict
+src/core/position_tracker.py:129:def _compat_quantity(self):
+src/core/position_tracker.py:132:@_compat_quantity.setter
+src/core/position_tracker.py:133:def _compat_quantity(self, value):
+src/core/position_tracker.py:136:Position.quantity = _compat_quantity
+src/core/position_tracker.py:141:def _compat_open_position(self, *args, **kwargs):
+src/core/position_tracker.py:148:def _compat_update_position(
+src/core/position_tracker.py:171:def _compat_get_position(self, key):
+src/core/position_tracker.py:191:PositionTracker.open_position = _compat_open_position
+src/core/position_tracker.py:192:PositionTracker.update_position = _compat_update_position
+src/core/position_tracker.py:193:PositionTracker.get_position = _compat_get_position
+src/core/order_manager.py:135:# === AtriaTrade REAL compatibility patch: baseline-7 ===
+src/core/order_manager.py:138:def _compat_enum_value(value):
+src/core/order_manager.py:141:def _compat_create_order(
+src/core/order_manager.py:150:    clean_side = str(_compat_enum_value(side)).upper()
+src/core/order_manager.py:151:    clean_type = str(_compat_enum_value(order_type)).upper()
+src/core/order_manager.py:182:OrderManager.create_order = _compat_create_order
+src/core/order_executor.py:226:        for m_name in ["update_position", "add_position", "open_position", "record_position"]:
+src/core/order_executor.py:390:# === AtriaTrade REAL compatibility patch: baseline-7 ===
+src/core/order_executor.py:391:def _compat_as_dict(item):
+src/core/order_executor.py:394:def _compat_place_and_execute_market_order(
+src/core/order_executor.py:424:        "order": _compat_as_dict(order),
+src/core/order_executor.py:425:        "position": _compat_as_dict(position),
+src/core/order_executor.py:429:def _compat_process_limit_orders(self, current_market_prices):
+src/core/order_executor.py:464:        self.position_tracker.update_position(
+src/core/order_executor.py:474:OrderExecutor.place_and_execute_market_order = _compat_place_and_execute_market_order
+src/core/order_executor.py:475:OrderExecutor.process_limit_orders = _compat_process_limit_orders
+src/core/integrated_pipeline.py:71:    def process_tick(
+src/core/integrated_pipeline.py:199:# === AtriaTrade REAL compatibility patch: baseline-7 ===
+src/core/integrated_pipeline.py:200:def _compat_pipeline_step(self, market_data):
+src/core/integrated_pipeline.py:245:IntegratedTradingPipeline.step = _compat_pipeline_step
+src/core/integrated_pipeline.py:246:IntegratedTradingPipeline.process_tick = _compat_pipeline_step
+src/core/order_executor.py.backup_20260824_174550:174:        for m_name in ["update_position", "add_position", "open_position", "record_position"]:
+src/core/order_executor.py.before_limit_trigger_fix_20260824:174:        for m_name in ["update_position", "add_position", "open_position", "record_position"]:
+src/core/order_executor.py.before_limit_fix_retry_20260824:174:        for m_name in ["update_position", "add_position", "open_position", "record_position"]:
+src/core/paper_session.py.before_papersession_alias_20260826_153517.bak:8:class PaperTradingSession:
+
+========== FULL TEST OUTPUT (no truncation) ==========
+F
+=================================== FAILURES ===================================
+_____________________________ test_order_lifecycle _____________________________
+
+    def test_order_lifecycle():
+        print("[1] Creating OrderManager...")
+        manager = OrderManager()
+    
+        print("[2] Creating LIMIT BUY order...")
+        order = manager.create_order(
+            symbol="BTCUSDT",
+            side="BUY",
+            order_type="LIMIT",
+            quantity=0.1,
+            price=50000.0,
+        )
+    
+        assert order["symbol"] == "BTCUSDT"
+        assert order["side"] == "BUY"
+        assert order["order_type"] == "LIMIT"
+        assert order["quantity"] == 0.1
+        assert order["price"] == 50000.0
+        assert order["status"] == "OPEN"
+        print("-> Order created successfully.")
+    
+        print("[3] Checking open orders...")
+>       open_orders = manager.list_open_orders("BTCUSDT")
+                      ^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'OrderManager' object has no attribute 'list_open_orders'. Did you mean: 'get_open_orders'?
+
+tests/test_order_manager.py:26: AttributeError
+----------------------------- Captured stdout call -----------------------------
+[1] Creating OrderManager...
+[2] Creating LIMIT BUY order...
+-> Order created successfully.
+[3] Checking open orders...
+=========================== short test summary info ============================
+FAILED tests/test_order_manager.py::test_order_lifecycle - AttributeError: 'O...
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!
+1 failed in 0.16s

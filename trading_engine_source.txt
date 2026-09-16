@@ -1,0 +1,151 @@
+     1	"""Trading Engine module for orchestrating signals, execution, and portfolio management."""
+     2	from typing import Dict, Any, Optional
+     3	import time
+     4	
+     5	
+     6	class TradingEngine:
+     7	    def __init__(
+     8	        self,
+     9	        portfolio_manager: Optional[Any] = None,
+    10	        risk_manager: Optional[Any] = None,
+    11	        order_executor: Optional[Any] = None,
+    12	        profit_reserve_manager: Optional[Any] = None,
+    13	        **kwargs
+    14	    ):
+    15	        # نگاشت سازگار برای پارامترهای تستی و ماژولار
+    16	        self.portfolio_manager = portfolio_manager or kwargs.get("portfolio")
+    17	        self.risk_manager = risk_manager or kwargs.get("risk")
+    18	        self.order_executor = order_executor or kwargs.get("executor")
+    19	        self.profit_reserve_manager = profit_reserve_manager or kwargs.get("reserve")
+    20	
+    21	        self.is_running = False
+    22	        self.last_tick_time = 0.0
+    23	        self._entry_prices: Dict[str, float] = {}
+    24	
+    25	    def start(self) -> None:
+    26	        self.is_running = True
+    27	
+    28	    def stop(self) -> None:
+    29	        self.is_running = False
+    30	
+    31	    def process_tick(self, tick: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    32	        """Processes an incoming market tick and executes simulated paper trades."""
+    33	        if not self.is_running:
+    34	            return None
+    35	
+    36	        if not isinstance(tick, dict):
+    37	            return None
+    38	
+    39	        symbol = tick.get("symbol")
+    40	        price = tick.get("price")
+    41	        signal = tick.get("signal")
+    42	        confidence = tick.get("confidence", 1.0)
+    43	
+    44	        if not symbol or price is None or price <= 0:
+    45	            return None
+    46	
+    47	        if signal not in ["BUY", "SELL", "HOLD"]:
+    48	            return None
+    49	
+    50	        if signal == "HOLD":
+    51	            return None
+    52	
+    53	        self.last_tick_time = time.time()
+    54	
+    55	        if signal == "BUY":
+    56	            qty = tick.get("quantity") or tick.get("qty")
+    57	            if not qty:
+    58	                # محاسبه حجم پیش‌فرض بر اساس پورتفولیو
+    59	                if self.portfolio_manager and hasattr(self.portfolio_manager, "cash"):
+    60	                    alloc_cash = self.portfolio_manager.cash * 0.5
+    61	                    qty = alloc_cash / price
+    62	                else:
+    63	                    qty = 0.1
+    64	
+    65	            # بررسی و ثبت خرید
+    66	            if self.portfolio_manager:
+    67	                if hasattr(self.portfolio_manager, "can_allocate"):
+    68	                    if not self.portfolio_manager.can_allocate(symbol, qty * price):
+    69	                        return None
+    70	
+    71	                buy_res = {}
+    72	                if hasattr(self.portfolio_manager, "record_buy"):
+    73	                    buy_res = self.portfolio_manager.record_buy(symbol=symbol, quantity=qty, price=price) or {}
+    74	                if isinstance(buy_res, dict) and buy_res.get("status") == "REJECTED":
+    75	                    return None
+    76	
+    77	            self._entry_prices[symbol] = float(price)
+    78	
+    79	            return {
+    80	                "symbol": symbol,
+    81	                "side": "BUY",
+    82	                "price": price,
+    83	                "quantity": qty,
+    84	                "status": "FILLED",
+    85	                "timestamp": self.last_tick_time
+    86	            }
+    87	
+    88	        elif signal == "SELL":
+    89	            current_qty = 0.0
+    90	            if self.portfolio_manager:
+    91	                if hasattr(self.portfolio_manager, "get_position"):
+    92	                    current_qty = self.portfolio_manager.get_position(symbol)
+    93	                elif hasattr(self.portfolio_manager, "positions"):
+    94	                    pos = self.portfolio_manager.positions.get(symbol, {})
+    95	                    if isinstance(pos, dict):
+    96	                        current_qty = pos.get("quantity", 0.0)
+    97	                    else:
+    98	                        current_qty = getattr(pos, "quantity", 0.0)
+    99	
+   100	            if current_qty <= 0.0:
+   101	                return None
+   102	
+   103	            qty_to_sell = tick.get("quantity") or tick.get("qty") or current_qty
+   104	            qty_to_sell = min(qty_to_sell, current_qty)
+   105	
+   106	            sell_res = {}
+   107	            if self.portfolio_manager and hasattr(self.portfolio_manager, "record_sell"):
+   108	                sell_res = self.portfolio_manager.record_sell(symbol=symbol, quantity=qty_to_sell, price=price) or {}
+   109	
+   110	            # محاسبه سود محقق‌شده
+   111	            realized_pnl = 0.0
+   112	            if isinstance(sell_res, dict) and "realized_pnl" in sell_res:
+   113	                realized_pnl = float(sell_res["realized_pnl"])
+   114	            else:
+   115	                entry_p = self._entry_prices.get(symbol, price)
+   116	                realized_pnl = (float(price) - float(entry_p)) * float(qty_to_sell)
+   117	
+   118	            # اگر از طریق محاسبات پورتفولیو هم سود مثبت بود ولی صفر گزارش شده بود:
+   119	            if realized_pnl <= 0.0 and symbol in self._entry_prices:
+   120	                entry_p = self._entry_prices[symbol]
+   121	                if price > entry_p:
+   122	                    realized_pnl = (float(price) - float(entry_p)) * float(qty_to_sell)
+   123	
+   124	            # انتقال سود به ProfitReserveManager
+   125	            if realized_pnl > 0.0 and self.profit_reserve_manager:
+   126	                reserve = self.profit_reserve_manager
+   127	                if hasattr(reserve, "add_to_vault") and callable(reserve.add_to_vault):
+   128	                    reserve.add_to_vault(realized_pnl)
+   129	                elif hasattr(reserve, "process_trade_profit") and callable(reserve.process_trade_profit):
+   130	                    reserve.process_trade_profit(realized_pnl)
+   131	                elif hasattr(reserve, "process_trade_pnl") and callable(reserve.process_trade_pnl):
+   132	                    reserve.process_trade_pnl(realized_pnl)
+   133	                elif hasattr(reserve, "deposit") and callable(reserve.deposit):
+   134	                    reserve.deposit(realized_pnl)
+   135	                elif hasattr(reserve, "record_profit") and callable(reserve.record_profit):
+   136	                    reserve.record_profit(realized_pnl)
+   137	                else:
+   138	                    cur_v = getattr(reserve, "vault_balance", 0.0) or 0.0
+   139	                    setattr(reserve, "vault_balance", float(cur_v) + realized_pnl)
+   140	
+   141	            return {
+   142	                "symbol": symbol,
+   143	                "side": "SELL",
+   144	                "price": price,
+   145	                "quantity": qty_to_sell,
+   146	                "realized_pnl": realized_pnl,
+   147	                "status": "FILLED",
+   148	                "timestamp": self.last_tick_time
+   149	            }
+   150	
+   151	        return None

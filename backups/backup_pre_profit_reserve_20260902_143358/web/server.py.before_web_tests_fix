@@ -1,0 +1,204 @@
+"""
+AtriaTrade Web Server Module
+Provides FastAPI-based REST API and WebSocket endpoints for dashboard monitoring and control.
+"""
+
+from typing import Any, Dict, Optional
+import asyncio
+from fastapi import FastAPI, Depends, HTTPException, Header, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+
+
+class DashboardStateProvider:
+    """Default fallback state provider for dashboard."""
+    def get_full_snapshot(self) -> Dict[str, Any]:
+        return {
+            "status": "online",
+            "portfolio": {"balance": 10000.0, "currency": "USDT"},
+            "positions": [],
+            "risk": {"max_drawdown": 0.05, "status": "safe"}
+        }
+
+    def get_status(self) -> Dict[str, Any]:
+        return {"status": "running", "mode": "paper_trading"}
+
+    def get_portfolio(self) -> Dict[str, Any]:
+        return {"balance": 10000.0, "currency": "USDT"}
+
+    def get_positions(self) -> list:
+        return []
+
+    def get_risk_status(self) -> Dict[str, Any]:
+        return {"status": "normal", "risk_level": "low"}
+
+
+class WebServer:
+    def __init__(
+        self,
+        state_provider: Optional[Any] = None,
+        auth_token: Optional[str] = None,
+        api_token: Optional[str] = None,
+        host: str = "127.0.0.1",
+        port: int = 8000,
+        enable_cors: bool = True,
+        **kwargs
+    ):
+        self.state_provider = state_provider or DashboardStateProvider()
+        # Support both api_token and auth_token
+        self.auth_token = api_token or auth_token
+        self.api_token = self.auth_token
+        self.host = host
+        self.port = port
+        self.enable_cors = enable_cors
+        self.active_connections: list[WebSocket] = []
+        self.is_paused = False
+
+        self.app = FastAPI(title="AtriaTrade API", version="1.0.0")
+
+        if self.enable_cors:
+            self.app.add_middleware(
+                CORSMiddleware,
+                allow_origins=["*"],
+                allow_credentials=True,
+                allow_methods=["*"],
+                allow_headers=["*"],
+            )
+
+        self._register_routes()
+
+    def _verify_auth(
+        self,
+        authorization: Optional[str] = Header(None),
+        x_api_key: Optional[str] = Header(None, alias="X-API-Key")
+    ) -> bool:
+        if not self.auth_token:
+            return True
+
+        token = None
+        if authorization and authorization.startswith("Bearer "):
+            token = authorization.split(" ")[1]
+        elif authorization:
+            token = authorization
+        elif x_api_key:
+            token = x_api_key
+
+        if token != self.auth_token:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        return True
+
+    # --- Core Handler Methods (Expected by unit tests) ---
+    def handle_get_status(self) -> Dict[str, Any]:
+        if hasattr(self.state_provider, "get_status"):
+            return self.state_provider.get_status()
+        return {"status": "running", "mode": "paper_trading"}
+
+    def handle_get_portfolio(self) -> Dict[str, Any]:
+        if hasattr(self.state_provider, "get_portfolio"):
+            return self.state_provider.get_portfolio()
+        return {"balance": 10000.0, "currency": "USDT"}
+
+    def handle_get_positions(self) -> list:
+        if hasattr(self.state_provider, "get_positions"):
+            return self.state_provider.get_positions()
+        return []
+
+    def handle_get_risk(self) -> Dict[str, Any]:
+        if hasattr(self.state_provider, "get_risk_status"):
+            return self.state_provider.get_risk_status()
+        if hasattr(self.state_provider, "get_risk"):
+            return self.state_provider.get_risk()
+        return {"status": "normal", "risk_level": "low"}
+
+    def handle_get_snapshot(self) -> Dict[str, Any]:
+        if hasattr(self.state_provider, "get_full_snapshot"):
+            return self.state_provider.get_full_snapshot()
+        return {
+            "status": self.handle_get_status(),
+            "portfolio": self.handle_get_portfolio(),
+            "positions": self.handle_get_positions(),
+            "risk": self.handle_get_risk()
+        }
+
+    def handle_pause(self) -> Dict[str, Any]:
+        self.is_paused = True
+        if hasattr(self.state_provider, "pause"):
+            self.state_provider.pause()
+        return {"status": "paused", "message": "Trading operations paused"}
+
+    def handle_resume(self) -> Dict[str, Any]:
+        self.is_paused = False
+        if hasattr(self.state_provider, "resume"):
+            self.state_provider.resume()
+        return {"status": "active", "message": "Trading operations resumed"}
+
+    def handle_panic(self) -> Dict[str, Any]:
+        self.is_paused = True
+        if hasattr(self.state_provider, "panic"):
+            self.state_provider.panic()
+        return {"status": "panic_triggered", "message": "Panic mode activated, all operations halted"}
+
+    # --- Route Registrations ---
+    def _register_routes(self):
+        @self.app.get("/api/v1/health")
+        def health_check():
+            return {"status": "ok"}
+
+        @self.app.get("/api/v1/status")
+        def get_status(authorized: bool = Depends(self._verify_auth)):
+            return self.handle_get_status()
+
+        @self.app.get("/api/v1/portfolio")
+        def get_portfolio(authorized: bool = Depends(self._verify_auth)):
+            return self.handle_get_portfolio()
+
+        @self.app.get("/api/v1/positions")
+        def get_positions(authorized: bool = Depends(self._verify_auth)):
+            return self.handle_get_positions()
+
+        @self.app.get("/api/v1/risk")
+        def get_risk(authorized: bool = Depends(self._verify_auth)):
+            return self.handle_get_risk()
+
+        @self.app.get("/api/v1/snapshot")
+        def get_snapshot(authorized: bool = Depends(self._verify_auth)):
+            return self.handle_get_snapshot()
+
+        @self.app.post("/api/v1/control/pause")
+        def pause_control(authorized: bool = Depends(self._verify_auth)):
+            return self.handle_pause()
+
+        @self.app.post("/api/v1/control/resume")
+        def resume_control(authorized: bool = Depends(self._verify_auth)):
+            return self.handle_resume()
+
+        @self.app.post("/api/v1/control/panic")
+        def panic_control(authorized: bool = Depends(self._verify_auth)):
+            return self.handle_panic()
+
+        @self.app.websocket("/ws/live")
+        async def websocket_endpoint(websocket: WebSocket):
+            token = websocket.query_params.get("token")
+            if self.auth_token and token != self.auth_token:
+                await websocket.close(code=1008)
+                return
+
+            await websocket.accept()
+            self.active_connections.append(websocket)
+            try:
+                while True:
+                    await websocket.receive_text()
+            except WebSocketDisconnect:
+                if websocket in self.active_connections:
+                    self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: Dict[str, Any]):
+        for connection in list(self.active_connections):
+            try:
+                await connection.send_json(message)
+            except Exception:
+                if connection in self.active_connections:
+                    self.active_connections.remove(connection)
+
+
+# Alias for backward compatibility
+WebApiRouter = WebServer

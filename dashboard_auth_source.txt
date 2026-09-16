@@ -1,0 +1,101 @@
+     1	import secrets
+     2	import time
+     3	from typing import Dict, Optional, Tuple
+     4	
+     5	
+     6	class SecureAuthManager:
+     7	    """
+     8	    مدیریت توکن‌های امن، کنترل دسترسی، تاریخ انقضا و جلوگیری از حملات Brute-force
+     9	    """
+    10	    def __init__(self, token_ttl_hours: float = 24.0, max_failed_attempts: int = 5, lockout_minutes: float = 15.0):
+    11	        self.token_ttl_seconds = token_ttl_hours * 3600.0
+    12	        self.max_failed_attempts = max_failed_attempts
+    13	        self.lockout_seconds = lockout_minutes * 60.0
+    14	        
+    15	        # ذخیره توکن‌ها: {token: {"username": ..., "role": ..., "created_at": ...}}
+    16	        self._tokens: Dict[str, dict] = {}
+    17	        # ثبت تلاش‌های ناموفق: {ip: {"count": ..., "last_failed": ..., "locked_until": ...}}
+    18	        self._failed_attempts: Dict[str, dict] = {}
+    19	
+    20	    def generate_token_for_user(self, username: str, role: str = "read_only") -> str:
+    21	        """تولید یک توکن تصادفی با آنتروپی بالا و ثبت آن"""
+    22	        token = secrets.token_urlsafe(32)
+    23	        self._tokens[token] = {
+    24	            "username": username,
+    25	            "role": role,
+    26	            "created_at": time.time()
+    27	        }
+    28	        return token
+    29	
+    30	    def generate_token(self, username: str, role: str = "read_only") -> str:
+    31	        """متد کمکی/مستعار برای تولید توکن"""
+    32	        return self.generate_token_for_user(username, role)
+    33	
+    34	    def is_locked_out(self, client_ip: Optional[str]) -> bool:
+    35	        """بررسی قفل بودن آی‌پی به دلیل تلاش‌های ناموفق مکرر"""
+    36	        if not client_ip or client_ip not in self._failed_attempts:
+    37	            return False
+    38	        
+    39	        record = self._failed_attempts[client_ip]
+    40	        if time.time() < record.get("locked_until", 0):
+    41	            return True
+    42	        return False
+    43	
+    44	    def record_failed_attempt(self, client_ip: Optional[str]):
+    45	        """ثبت تلاش ناموفق لاگین و قفل کردن IP در صورت عبور از سقف مجاز"""
+    46	        if not client_ip:
+    47	            return
+    48	        
+    49	        now = time.time()
+    50	        if client_ip not in self._failed_attempts:
+    51	            self._failed_attempts[client_ip] = {"count": 1, "last_failed": now, "locked_until": 0}
+    52	        else:
+    53	            record = self._failed_attempts[client_ip]
+    54	            if now > record.get("locked_until", 0) and (now - record.get("last_failed", 0)) > self.lockout_seconds:
+    55	                record["count"] = 1
+    56	            else:
+    57	                record["count"] += 1
+    58	            
+    59	            record["last_failed"] = now
+    60	            if record["count"] >= self.max_failed_attempts:
+    61	                record["locked_until"] = now + self.lockout_seconds
+    62	
+    63	    def authenticate_token(self, token: str, client_ip: Optional[str] = None) -> Tuple[bool, Optional[str], Optional[str]]:
+    64	        """
+    65	        اعتبارسنجی توکن بر اساس مقایسه مقاوم به حمله زمانی (Constant Time)، بررسی انقضا و وضعیت IP
+    66	        """
+    67	        if client_ip and self.is_locked_out(client_ip):
+    68	            return False, None, None
+    69	
+    70	        matched_token_data = None
+    71	        for active_token, data in list(self._tokens.items()):
+    72	            if secrets.compare_digest(active_token, token):
+    73	                matched_token_data = data
+    74	                break
+    75	
+    76	        if not matched_token_data:
+    77	            if client_ip:
+    78	                self.record_failed_attempt(client_ip)
+    79	            return False, None, None
+    80	
+    81	        # بررسی انقضا
+    82	        if (time.time() - matched_token_data["created_at"]) > self.token_ttl_seconds:
+    83	            return False, None, None
+    84	
+    85	        # پاک کردن تلاش ناموفق در صورت لاگین موفق
+    86	        if client_ip and client_ip in self._failed_attempts:
+    87	            del self._failed_attempts[client_ip]
+    88	
+    89	        return True, matched_token_data["username"], matched_token_data["role"]
+    90	
+    91	    def authenticate(self, token: str, client_ip: Optional[str] = None) -> Tuple[bool, Optional[str], Optional[str]]:
+    92	        """متد مستعار جهت سازگاری کامل با DashboardServer"""
+    93	        return self.authenticate_token(token, client_ip)
+    94	
+    95	    def revoke_token(self, token: str) -> bool:
+    96	        """ابطال صریح توکن"""
+    97	        for active_token in list(self._tokens.keys()):
+    98	            if secrets.compare_digest(active_token, token):
+    99	                del self._tokens[active_token]
+   100	                return True
+   101	        return False

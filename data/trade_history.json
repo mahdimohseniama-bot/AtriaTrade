@@ -1,0 +1,32 @@
+[
+  {
+    "timestamp": "2026-08-22T15:23:28.902270+00:00",
+    "symbol": "BTC/USDT",
+    "side": "BUY",
+    "amount": 0.001,
+    "execution_price": 105.0525,
+    "fee": 0.00010505,
+    "net_pnl": null,
+    "capital_status": {
+      "initial_capital": 100.0,
+      "current_capital": 100.0,
+      "profit_reserve": 0.0,
+      "total_value": 100.0
+    }
+  },
+  {
+    "timestamp": "2026-08-22T15:23:28.909568+00:00",
+    "symbol": "BTC/USDT",
+    "side": "SELL",
+    "amount": 0.001,
+    "execution_price": 99.95,
+    "fee": 9.995e-05,
+    "net_pnl": -0.0053075,
+    "capital_status": {
+      "initial_capital": 100.0,
+      "current_capital": 99.9946925,
+      "profit_reserve": 0.0,
+      "total_value": 99.9946925
+    }
+  }
+]

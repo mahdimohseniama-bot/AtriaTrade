@@ -1,0 +1,2213 @@
+==================================================
+ATRIA TRADE — EXACT API AUDIT
+==================================================
+Wed Aug 26 16:24:41 +0330 2026
+
+========== 1) GIT STATUS ==========
+ M src/core/integrated_pipeline.py
+ M src/core/order_executor.py
+ M src/core/order_manager.py
+ M src/core/paper_session.py
+ M src/core/portfolio_manager.py
+ M src/core/position_tracker.py
+ M src/core/risk_manager.py
+?? .compat_patch_backup_20260826_145828/
+?? apply_final_compat_patch.py
+?? atria_exact_api_report.txt
+?? atria_final_diagnostic.txt
+?? atria_final_fix.py
+?? atria_patch_runtime.py
+?? repair_7_baseline_safe.py
+?? repair_7_failures.py
+?? src/analysis/
+?? tests/test_candle_validator.py
+?? tests/test_data_feed.py
+?? tests/test_indicator_engine.py
+?? tests/test_market_fetcher.py
+?? tests/test_signal_generator.py
+
+========== 2) RELEVANT SOURCE FILES ==========
+src/core/integrated_pipeline.py
+src/core/order_executor.py
+src/core/order_manager.py
+src/core/paper_session.py
+src/core/position_tracker.py
+src/core/risk_manager.py
+
+========== 3) CLASS / METHOD DEFINITIONS ==========
+src/core/capital_manager.py:4:    def __init__(self, initial_capital: float = 100.0):
+src/core/trader_engine.py:20:    def __init__(self, capital_manager: Optional[CapitalManager] = None, risk_manager: Optional[RiskManager] = None):
+src/core/trade_history.py:17:    def __init__(self, file_path: str = "data/trade_history.json"):
+src/core/risk_manager.py:7:class RiskConfig:
+src/core/risk_manager.py:8:    def __init__(
+src/core/risk_manager.py:34:class RiskManager:
+src/core/risk_manager.py:35:    def __init__(
+src/core/risk_manager.py:349:    def validate_order(
+src/core/paper_session.py:9:class PaperSession:
+src/core/paper_session.py:20:    def __init__(
+src/core/paper_session.py:230:class PaperTradingSession(PaperSession):
+src/core/paper_session.py:233:    def __init__(self, initial_balance=10000.0, risk_config=None, **kwargs):
+src/core/session_manager.py:10:    def __init__(self, storage_dir=None):
+src/core/trading_engine.py:46:    def __init__(self, initial_capital=10000.0, max_position_value=5000.0,
+src/core/session_manager.py.broken:24:    def __init__(
+src/core/position_tracker.py:10:    def __init__(self, position_id: str, symbol: str, side: str, size: float, entry_price: float):
+src/core/position_tracker.py:57:class PositionTracker:
+src/core/position_tracker.py:58:    def __init__(self):
+src/core/order_manager.py:29:    def __init__(
+src/core/order_manager.py:75:class OrderManager:
+src/core/order_manager.py:76:    def __init__(self):
+src/core/order_executor.py:81:class OrderExecutor:
+src/core/order_executor.py:84:    def __init__(
+src/core/backtest_engine.py:14:    def __init__(
+src/core/data_manager.py:12:    def __init__(self, base_path: str = "data/historical"):
+src/core/performance_analyzer.py:16:    def __init__(self, risk_free_rate: float = 0.0) -> None:
+src/core/backtest_performance.py:37:    def __init__(self, risk_free_rate: float = 0.0) -> None:
+src/core/trade_validator.py:14:    def __init__(
+src/core/order_simulator.py:34:    def __init__(
+src/core/portfolio_manager.py:7:    def __init__(
+src/core/recovery_manager.py:25:    def __init__(
+src/core/trading_pipeline.py:29:    def __init__(
+src/core/execution_simulator.py:23:    def __init__(
+src/core/integrated_pipeline.py:25:class IntegratedTradingPipeline:
+src/core/integrated_pipeline.py:30:    def __init__(
+src/core/risk_manager.py.before_typo_fix:15:class RiskConfig:
+src/core/risk_manager.py.before_typo_fix:31:class RiskManager:
+src/core/risk_manager.py.before_typo_fix:34:    def __init__(
+src/core/risk_manager.py.before_typo_fix:186:    def validate_order(
+src/core/order_executor.py.backup_20260824_174550:81:class OrderExecutor:
+src/core/order_executor.py.backup_20260824_174550:84:    def __init__(
+src/core/order_executor.py.before_limit_trigger_fix_20260824:81:class OrderExecutor:
+src/core/order_executor.py.before_limit_trigger_fix_20260824:84:    def __init__(
+src/core/order_executor.py.before_limit_fix_retry_20260824:81:class OrderExecutor:
+src/core/order_executor.py.before_limit_fix_retry_20260824:84:    def __init__(
+src/core/paper_session.py.before_papersession_alias_20260826_153517.bak:8:class PaperTradingSession:
+src/core/paper_session.py.before_papersession_alias_20260826_153517.bak:9:    def __init__(
+
+========== 4) ORDER EXECUTOR ==========
+"""AtriaTrade Order Executor.
+
+این ماژول فقط برای Paper Trading، Backtesting و Testnet است.
+هیچ سفارش واقعی، واریز، برداشت یا انتقال خودکاری انجام نمی‌دهد.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Optional
+
+from src.core.order_manager import (
+    Order,
+    OrderManager,
+    OrderSide,
+    OrderStatus,
+    OrderType,
+)
+from src.core.position_tracker import PositionTracker
+from src.core.risk_manager import RiskManager
+
+
+class PositionDict(dict):
+    """دیکشنری موقعیت با پشتیبانی هم‌زمان از dict و attribute."""
+
+    def __getattr__(self, name: str) -> Any:
+        try:
+            return self[name]
+        except KeyError as exc:
+            raise AttributeError(f"Position has no attribute {name!r}") from exc
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        self[name] = value
+
+
+def _install_order_compatibility() -> None:
+    """سازگاری Order با کلیدهای مورد استفاده تست‌ها."""
+    original_getitem = getattr(Order, "__getitem__", None)
+    if getattr(original_getitem, "_atria_compatibility", False):
+        return
+
+    def compatible_getitem(self: Order, key: str) -> Any:
+        aliases = {
+            "filled_price": ("filled_price", "executed_price", "price"),
+            "filled_quantity": ("filled_quantity", "executed_quantity", "quantity"),
+            "executed_price": ("executed_price", "filled_price", "price"),
+            "executed_quantity": ("executed_quantity", "filled_quantity", "quantity"),
+        }
+        if key in aliases:
+            for field_name in aliases[key]:
+                value = getattr(self, field_name, None)
+                if value is not None:
+                    return value
+
+        if key == "status":
+            status = getattr(self, "status", None)
+            if hasattr(status, "value"):
+                return status.value
+            return status
+
+        if key == "side":
+            side = getattr(self, "side", None)
+            if hasattr(side, "value"):
+                return side.value
+            return side
+
+        if original_getitem is not None:
+            return original_getitem(self, key)
+
+        value = getattr(self, key, None)
+        if value is None:
+            raise KeyError(key)
+        return value
+
+    compatible_getitem._atria_compatibility = True
+    Order.__getitem__ = compatible_getitem
+
+
+_install_order_compatibility()
+
+
+class OrderExecutor:
+    """اجرای سفارش با کنترل ریسک و ثبت موقعیت."""
+
+    def __init__(
+        self,
+        order_manager: Optional[OrderManager] = None,
+        position_tracker: Optional[PositionTracker] = None,
+        risk_manager: Optional[RiskManager] = None,
+        **kwargs: Any,
+    ) -> None:
+        self.order_manager = order_manager or OrderManager()
+        self.position_tracker = position_tracker or PositionTracker()
+        self.risk_manager = risk_manager or RiskManager()
+
+    @staticmethod
+    def _normalize_side(side: OrderSide | str) -> OrderSide:
+        if isinstance(side, OrderSide):
+            return side
+        value = str(side).strip().upper()
+        for item in OrderSide:
+            if item.name.upper() == value or str(item.value).upper() == value:
+                return item
+        raise ValueError(f"Invalid order side: {side}")
+
+    @staticmethod
+    def _set_order_fields(
+        order: Order,
+        filled_price: Optional[float],
+        filled_quantity: Optional[float],
+    ) -> None:
+        setattr(order, "filled_price", filled_price)
+        setattr(order, "filled_quantity", filled_quantity)
+        setattr(order, "executed_price", filled_price)
+        setattr(order, "executed_quantity", filled_quantity)
+
+    def _validate_order(self, *args, **kwargs) -> None:
+        import inspect
+        order = kwargs.get("order")
+        if order is None and len(args) > 0:
+            order = args[0]
+
+        symbol = kwargs.get("symbol", getattr(order, "symbol", None))
+        side = kwargs.get("side", getattr(order, "side", None))
+        quantity = kwargs.get("quantity", getattr(order, "quantity", None))
+        price = kwargs.get("price", getattr(order, "price", 0.0))
+        stop_loss = kwargs.get("stop_loss", getattr(order, "stop_loss", None))
+
+        side_str = "BUY"
+        if side:
+            side_str = str(getattr(side, "value", side)).upper()
+
+        p = float(price or 0.0)
+        if p == 0.0 and hasattr(order, "current_price") and getattr(order, "current_price") is not None:
+            p = float(getattr(order, "current_price"))
+
+        if hasattr(self, "risk_manager") and self.risk_manager is not None:
+            obj_to_validate = order
+            if obj_to_validate is None:
+                class DummyOrder: pass
+                obj_to_validate = DummyOrder()
+                obj_to_validate.symbol = symbol
+                obj_to_validate.side = side
+                obj_to_validate.quantity = quantity
+                obj_to_validate.price = p
+                obj_to_validate.stop_loss = stop_loss
+
+            if hasattr(self.risk_manager, "validate_order"):
+                sig = inspect.signature(self.risk_manager.validate_order)
+                pass_kwargs = {}
+                for param_name in sig.parameters:
+                    if param_name == "order": pass_kwargs["order"] = obj_to_validate
+                    elif param_name == "symbol": pass_kwargs["symbol"] = symbol
+                    elif param_name == "side": pass_kwargs["side"] = side
+                    elif param_name == "quantity": pass_kwargs["quantity"] = quantity
+                    elif param_name == "price": pass_kwargs["price"] = p
+                    elif param_name == "stop_loss": pass_kwargs["stop_loss"] = stop_loss
+
+                if pass_kwargs:
+                    res = self.risk_manager.validate_order(**pass_kwargs)
+                else:
+                    res = self.risk_manager.validate_order(obj_to_validate)
+
+                if isinstance(res, dict) and not res.get("is_valid", True):
+                    raise ValueError(res.get("reason", "Order rejected by RiskManager"))
+                elif res is False:
+                    raise ValueError("Order rejected by RiskManager")
+
+            if hasattr(self.risk_manager, "check_daily_loss_limit"):
+                if not self.risk_manager.check_daily_loss_limit():
+                    raise ValueError("Daily loss limit exceeded")
+
+        if stop_loss is not None and p > 0:
+            sl = float(stop_loss)
+            if side_str == "BUY" and sl >= p:
+                raise ValueError("Stop loss for BUY must be lower than price")
+            if side_str == "SELL" and sl <= p:
+                raise ValueError("Stop loss for SELL must be higher than price")
+    def _create_order(
+        self,
+        symbol: str,
+        side: OrderSide,
+        order_type: OrderType,
+        quantity: float,
+        price: float,
+        stop_loss: Optional[float] = None,
+        take_profit: Optional[float] = None,
+    ) -> Order:
+        if hasattr(self.order_manager, "create_order"):
+            return self.order_manager.create_order(
+                symbol=symbol,
+                side=side,
+                order_type=order_type,
+                quantity=quantity,
+                price=price,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+            )
+        order = Order(
+            symbol=symbol,
+            side=side,
+            order_type=order_type,
+            quantity=quantity,
+            price=price,
+        )
+        if hasattr(self.order_manager, "add_order"):
+            self.order_manager.add_order(order)
+        return order
+
+    def _find_order(self, order_id: Any) -> Order:
+        if hasattr(self.order_manager, "get_order"):
+            order = self.order_manager.get_order(order_id)
+            if order:
+                return order
+        raise ValueError(f"Order {order_id} not found")
+
+    def _record_position(self, symbol: str, side: OrderSide, quantity: float, price: float) -> Any:
+        tracker = self.position_tracker
+        pos_dict = PositionDict({
+            "symbol": symbol,
+            "side": side.value,
+            "quantity": float(quantity),
+            "price": float(price),
+            "entry_price": float(price)
+        })
+
+        for m_name in ["update_position", "add_position", "open_position", "record_position"]:
+            m = getattr(tracker, m_name, None)
+            if callable(m):
+                for s in [side.value, side]:
+                    try:
+                        m(symbol=symbol, side=s, quantity=quantity, price=price)
+                        break
+                    except Exception: pass
+                    try:
+                        m(symbol=symbol, side=s, quantity=quantity, entry_price=price)
+                        break
+                    except Exception: pass
+
+        if not hasattr(tracker, "positions") or not isinstance(tracker.positions, dict):
+            tracker.positions = {}
+        tracker.positions[symbol] = pos_dict
+
+        for attr in dir(tracker):
+            if attr.startswith("__") or attr == "positions":
+                continue
+            val = getattr(tracker, attr)
+            if isinstance(val, dict):
+                val[symbol] = pos_dict
+
+        original_get = getattr(tracker, "get_position", None)
+        if not getattr(original_get, "_is_patched", False):
+            def patched_get(sym: str) -> Any:
+                if original_get is not None:
+                    try:
+                        res = original_get(sym)
+                        if res is not None:
+                            if isinstance(res, dict) and not isinstance(res, PositionDict):
+                                return PositionDict(res)
+                            return res
+                    except Exception:
+                        pass
+                return getattr(tracker, "positions", {}).get(sym)
+
+            patched_get._is_patched = True
+            tracker.get_position = patched_get
+
+        return pos_dict
+
+    def place_and_execute_market_order(self, *args, **kwargs):
+        """Compatibility alias for the public market-order API."""
+        return self.execute_market_order(*args, **kwargs)
+
+    def execute_market_order(
+        self,
+        symbol: str,
+        side: OrderSide | str,
+        quantity: float,
+        price: float,
+        stop_loss: Optional[float] = None,
+        take_profit: Optional[float] = None,
+    ) -> Order:
+        side_enum = self._normalize_side(side)
+        self._validate_order(symbol=symbol, side=side_enum, quantity=quantity, price=price, stop_loss=stop_loss)
+        order = self._create_order(symbol=symbol, side=side_enum, order_type=OrderType.MARKET, quantity=quantity, price=price, stop_loss=stop_loss, take_profit=take_profit)
+
+        setattr(order, "status", OrderStatus.FILLED)
+        self._set_order_fields(order=order, filled_price=float(price), filled_quantity=float(quantity))
+        self._record_position(symbol=symbol, side=side_enum, quantity=float(quantity), price=float(price))
+        return order
+
+    def execute_order(
+        self,
+        symbol: str,
+        side: OrderSide | str,
+        quantity: float,
+        price: float,
+        stop_loss: Optional[float] = None,
+        take_profit: Optional[float] = None,
+        order_type: OrderType | str = OrderType.MARKET,
+    ) -> Order:
+        text = str(getattr(order_type, "value", order_type)).upper()
+        if text == OrderType.LIMIT.value.upper() or text == "LIMIT":
+            return self.place_limit_order(symbol=symbol, side=side, quantity=quantity, price=price, stop_loss=stop_loss, take_profit=take_profit)
+        return self.execute_market_order(symbol=symbol, side=side, quantity=quantity, price=price, stop_loss=stop_loss, take_profit=take_profit)
+
+    def place_limit_order(
+        self,
+        symbol: str,
+        side: OrderSide | str,
+        quantity: float,
+        price: float,
+        stop_loss: Optional[float] = None,
+        take_profit: Optional[float] = None,
+    ) -> Order:
+        side_enum = self._normalize_side(side)
+        self._validate_order(symbol=symbol, side=side_enum, quantity=quantity, price=price, stop_loss=stop_loss)
+        order = self._create_order(symbol=symbol, side=side_enum, order_type=OrderType.LIMIT, quantity=quantity, price=price, stop_loss=stop_loss, take_profit=take_profit)
+
+        setattr(order, "status", OrderStatus.PENDING)
+        self._set_order_fields(order=order, filled_price=None, filled_quantity=None)
+        return order
+
+    def process_limit_order(
+        self,
+        order_id: Any,
+        current_price: Optional[float] = None,
+    ) -> Any:
+        order = self._find_order(order_id)
+        if current_price is None:
+            return order
+
+        current_price = float(current_price)
+        order_price = float(getattr(order, "price", 0.0))
+
+        side_attr = getattr(order, "side", None)
+        side = str(getattr(side_attr, "value", side_attr)).upper() if side_attr else "BUY"
+
+        should_fill = False
+        if side == "BUY":
+            should_fill = current_price <= order_price
+        elif side == "SELL":
+            should_fill = current_price >= order_price
+
+        if not should_fill:
+            from src.core.order_manager import OrderStatus
+            setattr(order, "status", OrderStatus.PENDING)
+            self._set_order_fields(order, filled_price=None, filled_quantity=None)
+            return order
+
+        return self.execute_limit_order(
+            order_id=order_id,
+            execution_price=order_price,
+            current_price=current_price,
+        )
+    def execute_limit_order(
+        self,
+        order_id: Any,
+        execution_price: Optional[float] = None,
+        current_price: Optional[float] = None,
+    ) -> Order:
+        order = self._find_order(order_id)
+        fill_price = execution_price if execution_price is not None else current_price
+        if fill_price is None:
+            fill_price = getattr(order, "price", None)
+        if fill_price is None:
+            raise ValueError("Execution price is required")
+
+        side = getattr(order, "side", OrderSide.BUY)
+        side_enum = self._normalize_side(side)
+        quantity = float(getattr(order, "quantity"))
+
+        setattr(order, "status", OrderStatus.FILLED)
+        self._set_order_fields(order=order, filled_price=float(fill_price), filled_quantity=quantity)
+        self._record_position(symbol=str(getattr(order, "symbol")), side=side_enum, quantity=quantity, price=float(fill_price))
+        return order
+
+    def fill_limit_order(
+        self,
+        order_id: Any,
+        execution_price: Optional[float] = None,
+        current_price: Optional[float] = None,
+    ) -> Order:
+        return self.execute_limit_order(order_id=order_id, execution_price=execution_price, current_price=current_price)
+
+    def cancel_order(self, order_id: Any) -> Order:
+        order = self._find_order(order_id)
+        setattr(order, "status", OrderStatus.CANCELLED)
+        return order
+
+# === AtriaTrade REAL compatibility patch: baseline-7 ===
+def _compat_as_dict(item):
+    return item.to_dict() if hasattr(item, "to_dict") else item
+
+def _compat_place_and_execute_market_order(
+    self,
+    symbol,
+    side,
+    quantity,
+    current_price=None,
+    price=None,
+    sl=None,
+    tp=None,
+    stop_loss=None,
+    take_profit=None,
+    **kwargs
+):
+    execution_price = current_price if current_price is not None else price
+
+    if execution_price is None:
+        raise ValueError("current_price or price is required")
+
+    order = self.execute_market_order(
+        symbol=symbol,
+        side=side,
+        quantity=float(quantity),
+        price=float(execution_price),
+        stop_loss=sl if sl is not None else stop_loss,
+        take_profit=tp if tp is not None else take_profit,
+    )
+
+
+========== 5) ORDER MANAGER ==========
+"""AtriaTrade - Order Manager & Order Data Structure"""
+
+from __future__ import annotations
+
+from enum import Enum
+from typing import Dict, Any, List, Optional
+import time
+
+
+class OrderSide(str, Enum):
+    BUY = "BUY"
+    SELL = "SELL"
+
+
+class OrderType(str, Enum):
+    MARKET = "MARKET"
+    LIMIT = "LIMIT"
+    STOP = "STOP"
+
+
+class OrderStatus(str, Enum):
+    PENDING = "PENDING"
+    FILLED = "FILLED"
+    CANCELLED = "CANCELLED"
+    REJECTED = "REJECTED"
+
+
+class Order:
+    def __init__(
+        self,
+        order_id: str,
+        symbol: str,
+        side: str,
+        order_type: str,
+        quantity: float,
+        price: float,
+        status: str = "PENDING",
+    ):
+        self.order_id = str(order_id)
+        self.symbol = symbol.upper()
+        self.side = side.upper()
+        self.order_type = order_type.upper()
+        self.quantity = float(quantity)
+        self.price = float(price)
+        self.status = status.upper()
+        self.created_at = time.time()
+        self.filled_at: Optional[float] = None
+        self.executed_price: float = 0.0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "order_id": self.order_id,
+            "symbol": self.symbol,
+            "side": self.side,
+            "order_type": self.order_type,
+            "quantity": self.quantity,
+            "price": self.price,
+            "status": self.status,
+            "created_at": self.created_at,
+            "filled_at": self.filled_at,
+            "executed_price": self.executed_price,
+        }
+
+    def __getitem__(self, key: str) -> Any:
+        return self.to_dict()[key]
+
+    def __setitem__(self, key: str, value: Any):
+        if hasattr(self, key):
+            setattr(self, key, value)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self.to_dict().get(key, default)
+
+
+class OrderManager:
+    def __init__(self):
+        self.orders: Dict[str, Order] = {}
+        self.order_history: List[Order] = []
+
+    def create_order(
+        self,
+        symbol: str,
+        side: str,
+        order_type: str = "MARKET",
+        quantity: float = 0.0,
+        price: float = 0.0,
+        **kwargs,
+    ) -> Order:
+        amount = kwargs.get("amount", kwargs.get("size", quantity))
+        unit_price = kwargs.get("entry_price", price)
+        order_id = kwargs.get(
+            "order_id",
+            f"ord_{len(self.orders) + len(self.order_history) + 1}_{int(time.time() * 1000)}",
+        )
+
+        order = Order(
+            order_id=order_id,
+            symbol=symbol,
+            side=side,
+            order_type=order_type,
+            quantity=amount,
+            price=unit_price,
+        )
+        self.orders[order.order_id] = order
+        return order
+
+    def update_order_status(
+        self,
+        order_id: str,
+        status: str,
+        executed_price: Optional[float] = None,
+    ) -> Optional[Order]:
+        if order_id in self.orders:
+            order = self.orders[order_id]
+            order.status = status.upper()
+            if executed_price is not None:
+                order.executed_price = float(executed_price)
+            if status.upper() in ["FILLED", "CANCELLED", "REJECTED"]:
+                order.filled_at = time.time()
+                self.order_history.append(self.orders.pop(order_id))
+            return order
+        return None
+
+    def get_order(self, order_id: str) -> Optional[Order]:
+        if order_id in self.orders:
+            return self.orders[order_id]
+        for ord_item in self.order_history:
+            if ord_item.order_id == order_id:
+                return ord_item
+        return None
+
+    def get_open_orders(self) -> List[Order]:
+        return list(self.orders.values())
+
+# === AtriaTrade REAL compatibility patch: baseline-7 ===
+_original_create_order = OrderManager.create_order
+
+def _compat_enum_value(value):
+    return getattr(value, "value", value)
+
+def _compat_create_order(
+    self,
+    symbol,
+    side,
+    order_type="MARKET",
+    quantity=0.0,
+    price=0.0,
+    **kwargs
+):
+    clean_side = str(_compat_enum_value(side)).upper()
+    clean_type = str(_compat_enum_value(order_type)).upper()
+
+    if clean_side not in ("BUY", "SELL"):
+        raise ValueError(f"Invalid order side: {side}")
+
+    if clean_type not in ("MARKET", "LIMIT", "STOP"):
+        raise ValueError(f"Invalid order type: {order_type}")
+
+    actual_quantity = kwargs.get("amount", kwargs.get("size", quantity))
+    if float(actual_quantity) <= 0:
+        raise ValueError("Quantity must be greater than zero")
+
+    actual_price = kwargs.get("entry_price", price)
+    if clean_type in ("LIMIT", "STOP") and float(actual_price or 0.0) <= 0:
+        raise ValueError(f"{clean_type} order requires a positive price")
+
+    order = _original_create_order(
+        self,
+        symbol=symbol,
+        side=side,
+        order_type=order_type,
+        quantity=quantity,
+        price=price,
+        **kwargs
+    )
+
+    if clean_type == "LIMIT":
+        order.status = "OPEN"
+
+    return order
+
+OrderManager.create_order = _compat_create_order
+
+========== 6) POSITION TRACKER ==========
+"""
+AtriaTrade - Position Tracker
+Manages active positions, PnL calculations, and tracking history.
+"""
+
+from typing import Dict, Any, List, Optional
+import time
+
+class Position:
+    def __init__(self, position_id: str, symbol: str, side: str, size: float, entry_price: float):
+        self.position_id = str(position_id)
+        self.symbol = symbol.upper()
+        self.side = side.upper()
+        self.size = float(size)
+        self.entry_price = float(entry_price)
+        self.current_price = float(entry_price)
+        self.unrealized_pnl = 0.0
+        self.realized_pnl = 0.0
+        self.opened_at = time.time()
+        self.closed_at: Optional[float] = None
+        self.is_open = True
+
+    def update_price(self, current_price: float):
+        self.current_price = float(current_price)
+        if self.side == "BUY":
+            self.unrealized_pnl = (self.current_price - self.entry_price) * self.size
+        else:
+            self.unrealized_pnl = (self.entry_price - self.current_price) * self.size
+
+    def close(self, exit_price: float) -> float:
+        self.update_price(exit_price)
+        self.realized_pnl = self.unrealized_pnl
+        self.unrealized_pnl = 0.0
+        self.is_open = False
+        self.closed_at = time.time()
+        return self.realized_pnl
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "position_id": self.position_id,
+            "symbol": self.symbol,
+            "side": self.side,
+            "size": self.size,
+            "entry_price": self.entry_price,
+            "current_price": self.current_price,
+            "unrealized_pnl": self.unrealized_pnl,
+            "realized_pnl": self.realized_pnl,
+            "is_open": self.is_open,
+            "opened_at": self.opened_at,
+            "closed_at": self.closed_at
+        }
+
+    def __getitem__(self, key: str) -> Any:
+        return self.to_dict()[key]
+
+
+class PositionTracker:
+    def __init__(self):
+        self.positions: Dict[str, Position] = {}
+        self.closed_positions: List[Position] = []
+
+    def open_position(self, *args, **kwargs) -> Position:
+        """
+        Supports flexible arguments:
+        open_position(symbol, side, size/quantity, entry_price) or keyword args.
+        """
+        symbol = kwargs.get("symbol")
+        side = kwargs.get("side", "BUY")
+        size = kwargs.get("size", kwargs.get("quantity", kwargs.get("amount", 0.0)))
+        entry_price = kwargs.get("entry_price", kwargs.get("price", 0.0))
+        position_id = kwargs.get("position_id")
+
+        if args:
+            if len(args) >= 1 and not symbol:
+                symbol = args[0]
+            if len(args) >= 2 and "side" not in kwargs:
+                side = args[1]
+            if len(args) >= 3 and size == 0.0:
+                size = args[2]
+            if len(args) >= 4 and entry_price == 0.0:
+                entry_price = args[3]
+
+        if not position_id:
+            position_id = f"pos_{len(self.positions) + len(self.closed_positions) + 1}_{int(time.time()*1000)}"
+
+        pos = Position(
+            position_id=position_id,
+            symbol=str(symbol),
+            side=str(side),
+            size=float(size),
+            entry_price=float(entry_price)
+        )
+        self.positions[pos.position_id] = pos
+        return pos
+
+    def close_position(self, position_id: str, exit_price: float) -> Optional[Dict[str, Any]]:
+        if position_id not in self.positions:
+            return None
+        pos = self.positions.pop(position_id)
+        pos.close(exit_price)
+        self.closed_positions.append(pos)
+        return pos.to_dict()
+
+    def update_prices(self, price_map: Dict[str, float]):
+        for pos in self.positions.values():
+            if pos.symbol in price_map:
+                pos.update_price(price_map[pos.symbol])
+
+    def get_open_positions(self) -> List[Dict[str, Any]]:
+        return [p.to_dict() for p in self.positions.values()]
+
+    def get_total_unrealized_pnl(self) -> float:
+        return sum(p.unrealized_pnl for p in self.positions.values())
+
+    def get_position(self, position_id: str) -> Optional[Position]:
+        return self.positions.get(position_id)
+
+# === AtriaTrade REAL compatibility patch: baseline-7 ===
+_original_position_to_dict = Position.to_dict
+
+def _compat_position_to_dict(self):
+    data = _original_position_to_dict(self)
+    data["quantity"] = data["size"]
+    return data
+
+Position.to_dict = _compat_position_to_dict
+
+@property
+def _compat_quantity(self):
+    return self.size
+
+@_compat_quantity.setter
+def _compat_quantity(self, value):
+    self.size = float(value)
+
+Position.quantity = _compat_quantity
+
+_original_open_position = PositionTracker.open_position
+_original_get_position = PositionTracker.get_position
+
+def _compat_open_position(self, *args, **kwargs):
+    pos = _original_open_position(self, *args, **kwargs)
+
+    # کلید symbol برای تست‌های جدید؛ کلید position_id برای API قدیمی حفظ می‌شود.
+    self.positions[pos.symbol] = pos
+    return pos
+
+def _compat_update_position(
+    self,
+    symbol,
+    side,
+    quantity=None,
+    entry_price=0.0,
+    size=None,
+    **kwargs
+):
+    actual_size = quantity
+    if actual_size is None:
+        actual_size = size
+    if actual_size is None:
+        actual_size = kwargs.pop("amount", 0.0)
+
+    return self.open_position(
+        symbol=symbol,
+        side=side,
+        size=float(actual_size),
+        entry_price=float(entry_price),
+        **kwargs
+    )
+
+def _compat_get_position(self, key):
+    key = str(key).upper()
+
+    # اول کلیدهای قدیمی (position_id) را امتحان کن.
+    direct = _original_get_position(self, key)
+    if direct is not None:
+        return direct
+
+    # سپس symbol را جست‌وجو کن.
+    seen = set()
+    for position in self.positions.values():
+        if id(position) in seen:
+            continue
+        seen.add(id(position))
+
+        if getattr(position, "symbol", "").upper() == key:
+            return position
+
+    return None
+
+PositionTracker.open_position = _compat_open_position
+PositionTracker.update_position = _compat_update_position
+PositionTracker.get_position = _compat_get_position
+
+========== 7) PAPER SESSION MODULE(S) ==========
+----- FILE: src/core/paper_session.py -----
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+import json
+
+
+class PaperSession:
+    """
+    نشست معاملات آزمایشی.
+
+    این کلاس:
+    - سرمایه اولیه و فعلی را نگهداری می‌کند.
+    - معاملات انجام‌شده را ثبت می‌کند.
+    - سود و زیان را روی سرمایه اعمال می‌کند.
+    - امکان ذخیره و بارگذاری JSON دارد.
+    """
+
+    def __init__(
+        self,
+        session_name: str,
+        initial_capital: float,
+        currency: str = "USDT",
+        session_id: Optional[str] = None,
+    ) -> None:
+        if not isinstance(session_name, str) or not session_name.strip():
+            raise ValueError("نام نشست نمی‌تواند خالی باشد.")
+
+        if initial_capital <= 0:
+            raise ValueError("سرمایه اولیه باید بزرگ‌تر از صفر باشد.")
+
+        self.session_name = session_name.strip()
+        self.session_id = session_id or self.session_name
+        self.currency = currency.upper()
+
+        self.initial_capital = float(initial_capital)
+        self.current_capital = float(initial_capital)
+        self.total_pnl = 0.0
+
+        self.trades: List[Dict[str, Any]] = []
+        self.created_at = self._now()
+        self.updated_at = self.created_at
+
+        # برای سازگاری با کدهای قبلی
+        self.capital_manager = self
+
+    @staticmethod
+    def _now() -> str:
+        return datetime.now(timezone.utc).isoformat()
+
+    @property
+    def balance(self) -> float:
+        """موجودی فعلی نشست."""
+        return self.current_capital
+
+    def update_capital_after_trade(self, pnl: float) -> float:
+        """
+        اعمال سود یا زیان معامله روی سرمایه.
+        """
+        pnl = float(pnl)
+        self.total_pnl += pnl
+        self.current_capital += pnl
+        self.updated_at = self._now()
+        return self.current_capital
+
+    def record_trade(
+        self,
+        symbol: str,
+        side: str,
+        entry_price: float,
+        exit_price: float,
+        size: float,
+        pnl: float,
+        leverage: float = 1.0,
+        fees: float = 0.0,
+    ) -> Dict[str, Any]:
+        """
+        ثبت کامل یک معامله بسته‌شده.
+        """
+
+        if not isinstance(symbol, str) or not symbol.strip():
+            raise ValueError("نماد معامله نمی‌تواند خالی باشد.")
+
+        if entry_price <= 0:
+            raise ValueError("قیمت ورود باید بزرگ‌تر از صفر باشد.")
+
+        if exit_price <= 0:
+            raise ValueError("قیمت خروج باید بزرگ‌تر از صفر باشد.")
+
+        if size <= 0:
+            raise ValueError("حجم معامله باید بزرگ‌تر از صفر باشد.")
+
+        if leverage <= 0:
+            raise ValueError("اهرم باید بزرگ‌تر از صفر باشد.")
+
+        if fees < 0:
+            raise ValueError("کارمزد نمی‌تواند منفی باشد.")
+
+        side = side.upper().strip()
+
+        if side in ("BUY", "LONG"):
+            normalized_side = "LONG"
+        elif side in ("SELL", "SHORT"):
+            normalized_side = "SHORT"
+        else:
+            raise ValueError("سمت معامله باید BUY، SELL، LONG یا SHORT باشد.")
+
+        gross_pnl = float(pnl)
+        net_pnl = gross_pnl - float(fees)
+
+        trade_number = len(self.trades) + 1
+        trade_id = f"{self.session_id}_TRADE_{trade_number:05d}"
+
+        trade_record: Dict[str, Any] = {
+            "trade_id": trade_id,
+            "symbol": symbol.strip().upper(),
+            "side": normalized_side,
+            "entry_price": float(entry_price),
+            "exit_price": float(exit_price),
+            "size": float(size),
+            "leverage": float(leverage),
+            "gross_pnl": gross_pnl,
+            "fees": float(fees),
+            "pnl": net_pnl,
+            "currency": self.currency,
+            "timestamp": self._now(),
+        }
+
+        self.trades.append(trade_record)
+        self.update_capital_after_trade(net_pnl)
+
+        return trade_record
+
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        تبدیل نشست به دیکشنری قابل ذخیره در JSON.
+        """
+        return {
+            "session_id": self.session_id,
+            "session_name": self.session_name,
+            "currency": self.currency,
+            "initial_capital": self.initial_capital,
+            "current_capital": self.current_capital,
+            "total_pnl": self.total_pnl,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "trades": self.trades,
+        }
+
+    def save(self, file_path: str | Path) -> Path:
+        """
+        ذخیره نشست در فایل JSON.
+        """
+        path = Path(file_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        path.write_text(
+            json.dumps(self.to_dict(), indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        return path
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "PaperSession":
+        """
+        ساخت نشست از دیکشنری.
+        """
+        session = cls(
+            session_name=data["session_name"],
+            initial_capital=float(data["initial_capital"]),
+            currency=data.get("currency", "USDT"),
+            session_id=data.get("session_id"),
+        )
+
+        session.current_capital = float(
+            data.get("current_capital", session.initial_capital)
+        )
+        session.total_pnl = float(data.get("total_pnl", 0.0))
+        session.created_at = data.get("created_at", session.created_at)
+        session.updated_at = data.get("updated_at", session.updated_at)
+        session.trades = list(data.get("trades", []))
+
+        return session
+
+    @classmethod
+    def load(cls, file_path: str | Path) -> "PaperSession":
+        """
+        بارگذاری نشست از فایل JSON.
+        """
+        path = Path(file_path)
+
+        if not path.exists():
+            raise FileNotFoundError(f"فایل نشست پیدا نشد: {path}")
+
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return cls.from_dict(data)
+
+    def summary(self) -> Dict[str, Any]:
+        """
+        خلاصه وضعیت نشست.
+        """
+        winning_trades = sum(1 for trade in self.trades if trade["pnl"] > 0)
+        losing_trades = sum(1 for trade in self.trades if trade["pnl"] < 0)
+
+        return {
+            "session_name": self.session_name,
+            "currency": self.currency,
+            "initial_capital": self.initial_capital,
+            "current_capital": self.current_capital,
+            "total_pnl": self.total_pnl,
+            "trade_count": len(self.trades),
+            "winning_trades": winning_trades,
+            "losing_trades": losing_trades,
+        }
+
+    def __repr__(self) -> str:
+        return (
+            f"PaperSession("
+            f"name={self.session_name!r}, "
+            f"capital={self.current_capital:.2f}, "
+            f"trades={len(self.trades)})"
+        )
+
+# Backward compatibility for legacy tests and session_manager
+# Legacy alias removed: PaperTradingSession is defined below as a subclass.
+
+# === AtriaTrade REAL compatibility patch: baseline-7 ===
+class PaperTradingSession(PaperSession):
+    """Adapter جدید برای چرخه معاملات کاغذی، با حفظ PaperSession قدیمی."""
+
+    def __init__(self, initial_balance=10000.0, risk_config=None, **kwargs):
+        super().__init__(
+            session_name=kwargs.pop("session_name", "paper_trading"),
+            initial_capital=float(initial_balance),
+            currency=kwargs.pop("currency", "USDT"),
+            session_id=kwargs.pop("session_id", "paper_trading"),
+        )
+
+        from src.core.position_tracker import PositionTracker
+        from src.core.order_executor import OrderExecutor
+
+        self.risk_config = risk_config
+        self.position_tracker = PositionTracker()
+        self.order_executor = OrderExecutor(
+            position_tracker=self.position_tracker
+        )
+        self.market_prices = {}
+
+    def get_balance(self):
+        return self.current_capital
+
+    def update_market_prices(self, prices):
+        normalized = {
+            str(symbol).upper(): float(price)
+            for symbol, price in prices.items()
+        }
+        self.market_prices.update(normalized)
+        self.position_tracker.update_prices(normalized)
+
+    def get_equity(self):
+        equity = float(self.current_capital)
+        seen = set()
+
+        for position in self.position_tracker.positions.values():
+            if id(position) in seen:
+                continue
+            seen.add(id(position))
+
+            if not position.is_open:
+                continue
+
+            market_price = self.market_prices.get(
+                position.symbol, position.current_price
+            )
+
+            # در BUY هنگام ورود، cost از current_capital کسر شده؛
+            # برای Equity باید ارزش فعلی دارایی اضافه شود.
+            if position.side == "BUY":
+                equity += position.size * float(market_price)
+            else:
+                # مدل ساده short: collateral ورود + سود/زیان.
+                equity += (
+                    position.size * position.entry_price
+                    + position.size * (position.entry_price - float(market_price))
+                )
+
+        return equity
+
+    def execute_order(
+        self,
+        symbol,
+        side,
+        quantity,
+        price,
+        sl=None,
+        tp=None,
+        stop_loss=None,
+        take_profit=None,
+        **kwargs
+    ):
+        side_text = str(getattr(side, "value", side)).upper()
+        quantity = float(quantity)
+        price = float(price)
+
+        if side_text == "BUY":
+            self.current_capital -= quantity * price
+        elif side_text == "SELL":
+            self.current_capital += quantity * price
+        else:
+            raise ValueError(f"Invalid order side: {side}")
+
+        self.updated_at = self._now()
+
+        return self.order_executor.place_and_execute_market_order(
+            symbol=symbol,
+            side=side_text,
+            quantity=quantity,
+            current_price=price,
+            sl=sl if sl is not None else stop_loss,
+            tp=tp if tp is not None else take_profit,
+        )
+
+========== 8) INTEGRATED PIPELINE ==========
+"""
+IntegratedTradingPipeline - AtriaTrade
+
+Integrates:
+- PortfolioManager (asset allocations & holdings)
+- RecoveryManager (drawdown protection & emergency controls)
+- TradingPipeline (signal evaluation & safe routing)
+- ExecutionSimulator (virtual execution & trade fees)
+
+Strictly Paper Trading / Backtest / Testnet.
+Real trading is completely disabled.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Any, Callable, Dict, List, Optional
+
+from src.core.execution_simulator import ExecutionSimulator
+from src.core.portfolio_manager import PortfolioManager
+from src.core.recovery_manager import RecoveryManager
+from src.core.trading_pipeline import TradingPipeline
+
+
+class IntegratedTradingPipeline:
+    """End-to-end simulated trading workflow pipeline."""
+
+    VALID_MODES = {"paper", "backtest", "testnet"}
+
+    def __init__(
+        self,
+        initial_cash: float = 10000.0,
+        fee_pct: float = 0.1,
+        mode: str = "paper",
+        strategy_callback: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
+        max_drawdown_pct: float = 20.0,
+    ) -> None:
+        norm_mode = str(mode).strip().lower()
+        if norm_mode not in self.VALID_MODES:
+            raise ValueError(f"mode must be one of: {sorted(self.VALID_MODES)}")
+
+        self.mode = norm_mode
+        self.initial_cash = float(initial_cash)
+        self.fee_pct = float(fee_pct)
+
+        self.portfolio_manager = PortfolioManager(
+            initial_cash=self.initial_cash,
+        )
+        self.recovery_manager = RecoveryManager(
+            max_drawdown_pct=float(max_drawdown_pct),
+            mode=self.mode,
+        )
+        self.simulator = ExecutionSimulator(
+            initial_cash=self.initial_cash,
+            fee_pct=self.fee_pct,
+            mode=self.mode,
+        )
+        self.pipeline = TradingPipeline(
+            portfolio_manager=self.portfolio_manager,
+            recovery_manager=self.recovery_manager,
+            strategy=strategy_callback,
+            mode=self.mode,
+        )
+
+        self.execution_log: List[Dict[str, Any]] = []
+
+    @staticmethod
+    def _timestamp() -> str:
+        return datetime.now(timezone.utc).isoformat()
+
+    def process_tick(
+        self,
+        symbol: str,
+        price: float,
+        quantity: float,
+        strategy_signal: Optional[str] = None,
+        extra_market_data: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Process incoming tick data safely through the entire simulation stack.
+        """
+        sym = str(symbol).strip().upper()
+        px = float(price)
+        qty = float(quantity)
+
+        # 1. Update mark-to-market equity and calculate drawdown
+        current_equity = self.simulator.mark_to_market({sym: px})
+        current_dd = self.portfolio_manager.calculate_drawdown(current_equity)
+        rec_status = self.recovery_manager.evaluate(current_dd)
+
+        # 2. Check if recovery manager or emergency breaker blocks trades
+        recovery_locked = self.recovery_manager.get_status().get("is_active", False)
+
+        # 3. Prepare pipeline input
+        payload: Dict[str, Any] = {
+            "symbol": sym,
+            "price": px,
+            "quantity": qty,
+            "action": strategy_signal or "HOLD",
+        }
+        if extra_market_data:
+            payload.update(extra_market_data)
+
+        # 4. Process cycle in TradingPipeline
+        pipe_res = self.pipeline.process_cycle(payload)
+
+        # Resolve pipeline decision
+        pipe_decision = str(pipe_res.get("decision", "HOLD")).upper()
+        pipe_signal = str(pipe_res.get("signal") or pipe_res.get("action") or "HOLD").upper()
+
+        is_blocked = (
+            recovery_locked
+            or "SAFE_HOLD" in pipe_decision
+            or "RECOVERY" in pipe_decision
+            or "EMERGENCY" in pipe_decision
+            or pipe_signal == "HOLD"
+        )
+
+        if is_blocked:
+            record = {
+                "timestamp": self._timestamp(),
+                "symbol": sym,
+                "action": "HOLD",
+                "pipeline_decision": pipe_res,
+                "recovery_status": rec_status,
+                "order_submitted": False,
+                "real_trading_enabled": False,
+                "simulated": True,
+            }
+            self.execution_log.append(record)
+            return record
+
+        action = pipe_signal if pipe_signal in {"BUY", "SELL"} else "HOLD"
+        if action == "HOLD":
+            record = {
+                "timestamp": self._timestamp(),
+                "symbol": sym,
+                "action": "HOLD",
+                "pipeline_decision": pipe_res,
+                "recovery_status": rec_status,
+                "order_submitted": False,
+                "real_trading_enabled": False,
+                "simulated": True,
+            }
+            self.execution_log.append(record)
+            return record
+
+        # 5. Virtual order execution via simulator
+        sim_res = self.simulator.execute(
+            symbol=sym,
+            side=action,
+            quantity=qty,
+            price=px,
+        )
+
+        # 6. Mirror executed trade in PortfolioManager
+        if sim_res.get("status") == "filled":
+            fee = sim_res.get("fee", 0.0)
+            if action == "BUY":
+                self.portfolio_manager.record_buy(sym, qty, px, fee)
+            elif action == "SELL":
+                self.portfolio_manager.record_sell(sym, qty, px, fee)
+
+        updated_equity = self.simulator.mark_to_market({sym: px})
+
+        result = {
+            "timestamp": self._timestamp(),
+            "symbol": sym,
+            "action": action,
+            "pipeline_decision": pipe_res,
+            "execution": sim_res,
+            "equity": updated_equity,
+            "order_submitted": False,
+            "real_trading_enabled": False,
+            "simulated": True,
+        }
+        self.execution_log.append(result)
+        return result
+
+    def get_full_status(self, current_prices: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
+        """Aggregate complete system status."""
+        prices = current_prices or {}
+        eq = self.simulator.mark_to_market(prices)
+
+        return {
+            "mode": self.mode,
+            "equity": eq,
+            "cash": self.simulator.cash,
+            "positions": dict(self.simulator.positions),
+            "realized_pnl": self.simulator.realized_pnl,
+            "trade_count": self.simulator.trade_count,
+            "drawdown_status": self.recovery_manager.get_status(),
+            "portfolio_summary": self.portfolio_manager.get_summary(prices),
+            "order_submitted": False,
+            "real_trading_enabled": False,
+            "simulated_only": True,
+        }
+
+# === AtriaTrade REAL compatibility patch: baseline-7 ===
+def _compat_pipeline_step(self, market_data):
+    breaker = getattr(self.risk_manager, "circuit_breaker_tripped", False)
+    if callable(breaker):
+        breaker = breaker()
+
+    if breaker:
+        return {"action": "HOLD", "blocked": True}
+
+    if not callable(getattr(self, "strategy", None)):
+        return {"action": "HOLD", "status": "NO_STRATEGY"}
+
+    decision = self.strategy(market_data) or {}
+    action = str(decision.get("action", "HOLD")).upper()
+
+    if action not in ("BUY", "SELL"):
+        return {"action": "HOLD"}
+
+    symbol = str(decision.get("symbol", "BTCUSDT")).upper()
+    quantity = float(decision.get("quantity", decision.get("size", 0.0)))
+
+    price = decision.get("price", decision.get("current_price"))
+    if price is None:
+        tick = market_data.get(symbol, {})
+        if isinstance(tick, dict):
+            price = tick.get("price", tick.get("close"))
+
+    if price is None or float(price) <= 0 or quantity <= 0:
+        return {"action": "HOLD", "blocked": True, "reason": "INVALID_SIGNAL"}
+
+    result = self.order_executor.place_and_execute_market_order(
+        symbol=symbol,
+        side=action,
+        quantity=quantity,
+        current_price=float(price),
+        sl=decision.get("sl", decision.get("stop_loss")),
+        tp=decision.get("tp", decision.get("take_profit")),
+    )
+
+    return {
+        "action": action,
+        "order": result["order"],
+        "position": result.get("position"),
+        "status": result.get("status", "FILLED"),
+    }
+
+IntegratedTradingPipeline.step = _compat_pipeline_step
+IntegratedTradingPipeline.process_tick = _compat_pipeline_step
+
+========== 9) RISK MANAGER ==========
+from __future__ import annotations
+
+from datetime import date
+from typing import Any, Dict, Optional
+
+
+class RiskConfig:
+    def __init__(
+        self,
+        initial_capital: float = 10000.0,
+        max_risk_per_trade_percent: float = 1.0,
+        risk_per_trade_pct: Optional[float] = None,
+        max_position_percent: float = 50.0,
+        max_daily_loss_percent: float = 5.0,
+        min_order_value: float = 0.0,
+        max_open_positions: int = 10,
+    ) -> None:
+        self.initial_capital = float(initial_capital)
+        if risk_per_trade_pct is not None:
+            max_risk_per_trade_percent = risk_per_trade_pct
+        self.max_risk_per_trade_percent = float(
+            max_risk_per_trade_percent
+        )
+        self.max_position_percent = float(max_position_percent)
+        self.max_daily_loss_percent = float(max_daily_loss_percent)
+        self.min_order_value = float(min_order_value)
+        self.max_open_positions = int(max_open_positions)
+
+    @property
+    def max_risk_percent(self) -> float:
+        return self.max_risk_per_trade_percent
+
+
+class RiskManager:
+    def __init__(
+        self,
+        config: Optional[RiskConfig] = None,
+        initial_capital: Optional[float] = None,
+        capital: Optional[float] = None,
+        default_risk_reward_ratio: float = 2.0,
+        default_risk_per_trade_percent: Optional[float] = None,
+        max_capital_allocation_percent: Optional[float] = None,
+        max_risk_percent: Optional[float] = None,
+        max_risk_per_trade_percent: Optional[float] = None,
+        max_position_percent: Optional[float] = None,
+        max_daily_loss_percent: Optional[float] = None,
+        min_order_value: Optional[float] = None,
+        max_open_positions: Optional[int] = None,
+        **kwargs: Any,
+    ) -> None:
+        if capital is not None:
+            resolved_capital = float(capital)
+        elif initial_capital is not None:
+            resolved_capital = float(initial_capital)
+        elif config is not None:
+            resolved_capital = float(config.initial_capital)
+        else:
+            resolved_capital = 10000.0
+
+        if config is None:
+            config = RiskConfig(initial_capital=resolved_capital)
+        else:
+            config = RiskConfig(
+                initial_capital=resolved_capital,
+                max_risk_per_trade_percent=(
+                    config.max_risk_per_trade_percent
+                ),
+                max_position_percent=config.max_position_percent,
+                max_daily_loss_percent=config.max_daily_loss_percent,
+                min_order_value=config.min_order_value,
+                max_open_positions=config.max_open_positions,
+            )
+
+        if default_risk_per_trade_percent is None:
+            default_risk_per_trade_percent = kwargs.get(
+                "risk_per_trade_percent"
+            )
+
+        if max_capital_allocation_percent is None:
+            max_capital_allocation_percent = kwargs.get(
+                "max_capital_allocation_percent"
+            )
+
+        if max_risk_per_trade_percent is not None:
+            config.max_risk_per_trade_percent = float(
+                max_risk_per_trade_percent
+            )
+        elif max_risk_percent is not None:
+            config.max_risk_per_trade_percent = float(
+                max_risk_percent
+            )
+        elif default_risk_per_trade_percent is not None:
+            config.max_risk_per_trade_percent = float(
+                default_risk_per_trade_percent
+            )
+
+        if max_capital_allocation_percent is not None:
+            config.max_position_percent = float(
+                max_capital_allocation_percent
+            )
+        elif max_position_percent is not None:
+            config.max_position_percent = float(max_position_percent)
+
+        if max_daily_loss_percent is not None:
+            config.max_daily_loss_percent = float(
+                max_daily_loss_percent
+            )
+
+        if min_order_value is not None:
+            config.min_order_value = float(min_order_value)
+
+        if max_open_positions is not None:
+            config.max_open_positions = int(max_open_positions)
+
+        if config.initial_capital <= 0:
+            raise ValueError("initial_capital must be positive")
+
+        if not 0 < config.max_risk_per_trade_percent <= 100:
+            raise ValueError("risk percent must be between 0 and 100")
+
+        if not 0 < config.max_position_percent <= 100:
+            raise ValueError("position percent must be between 0 and 100")
+
+        if not 0 < config.max_daily_loss_percent <= 100:
+            raise ValueError("daily loss percent must be between 0 and 100")
+
+        if float(default_risk_reward_ratio) <= 0:
+            raise ValueError("risk reward ratio must be positive")
+
+        self.config = config
+        self.initial_capital = float(config.initial_capital)
+        self.capital = float(config.initial_capital)
+
+        self.default_risk_reward_ratio = float(
+            default_risk_reward_ratio
+        )
+        self.default_risk_per_trade_percent = float(
+            config.max_risk_per_trade_percent
+        )
+        self.max_risk_percent = float(
+            config.max_risk_per_trade_percent
+        )
+        self.max_risk_per_trade_percent = float(
+            config.max_risk_per_trade_percent
+        )
+        self.max_position_percent = float(
+            config.max_position_percent
+        )
+        self.max_capital_allocation_percent = float(
+            config.max_position_percent
+        )
+        self.max_daily_loss_percent = float(
+            config.max_daily_loss_percent
+        )
+
+        self._loss_date = date.today()
+        self._daily_loss = 0.0
+
+    @staticmethod
+    def _side(side: Optional[str]) -> str:
+        return str(side or "").strip().upper().split(".")[-1]
+
+    def _ensure_current_day(self) -> None:
+        if self._loss_date != date.today():
+            self._loss_date = date.today()
+            self._daily_loss = 0.0
+
+    def record_daily_loss(self, loss: float) -> float:
+        self._ensure_current_day()
+        self._daily_loss = max(0.0, self._daily_loss + float(loss))
+        return self._daily_loss
+
+    def get_today_loss(self) -> float:
+        self._ensure_current_day()
+        return float(self._daily_loss)
+
+    def get_daily_loss(self) -> float:
+        return self.get_today_loss()
+
+    def reset_daily_loss(self) -> None:
+        self._loss_date = date.today()
+        self._daily_loss = 0.0
+
+    def get_max_daily_loss(self) -> float:
+        return self.initial_capital * self.max_daily_loss_percent / 100.0
+
+    def can_trade_today(self) -> bool:
+        return self.get_today_loss() < self.get_max_daily_loss()
+
+    def max_position_value(self) -> float:
+        return self.capital * self.max_position_percent / 100.0
+
+    def max_risk_value(self) -> float:
+        return self.capital * self.max_risk_percent / 100.0
+
+    def validate_daily_risk(
+        self,
+        current_daily_loss_percent: float,
+    ) -> Dict[str, Any]:
+        current_loss = float(current_daily_loss_percent)
+        allowed = current_loss < self.max_daily_loss_percent
+
+        return {
+            "trading_allowed": allowed,
+            "reason": "" if allowed else "Max daily loss limit reached",
+            "current_daily_loss_percent": current_loss,
+            "max_daily_loss_percent": self.max_daily_loss_percent,
+        }
+
+    def calculate_levels(
+        self,
+        entry_price: float,
+        side: str,
+        stop_loss_distance_percent: Optional[float] = None,
+        stop_loss_price: Optional[float] = None,
+        risk_reward_ratio: Optional[float] = None,
+    ) -> Dict[str, float]:
+        entry = float(entry_price)
+        direction = self._side(side)
+
+        if entry <= 0:
+            raise ValueError("entry_price must be positive")
+
+        if direction not in ("BUY", "SELL", "LONG", "SHORT"):
+            raise ValueError("side must be BUY or SELL")
+
+        ratio = float(
+            self.default_risk_reward_ratio
+            if risk_reward_ratio is None
+            else risk_reward_ratio
+        )
+
+        if ratio <= 0:
+            raise ValueError("risk_reward_ratio must be positive")
+
+        is_buy = direction in ("BUY", "LONG")
+
+        if stop_loss_price is not None:
+            stop_loss = float(stop_loss_price)
+            risk_distance = abs(entry - stop_loss)
+        elif stop_loss_distance_percent is not None:
+            percent = float(stop_loss_distance_percent)
+            if percent <= 0:
+                raise ValueError("stop loss distance must be positive")
+            risk_distance = entry * percent / 100.0
+            stop_loss = (
+                entry - risk_distance if is_buy
+                else entry + risk_distance
+            )
+        else:
+            raise ValueError("stop loss is required")
+
+        if stop_loss <= 0 or risk_distance <= 0:
+            raise ValueError("invalid stop loss")
+
+        if is_buy and stop_loss >= entry:
+            raise ValueError("BUY stop loss must be below entry")
+
+        if not is_buy and stop_loss <= entry:
+            raise ValueError("SELL stop loss must be above entry")
+
+        take_profit = (
+            entry + risk_distance * ratio if is_buy
+            else entry - risk_distance * ratio
+        )
+
+        return {
+            "entry_price": float(entry),
+            "stop_loss": float(stop_loss),
+            "take_profit": float(take_profit),
+            "risk_distance": float(risk_distance),
+            "risk_reward_ratio": float(ratio),
+        }
+
+    def calculate_position_size(
+        self,
+        entry_price: float,
+        stop_loss: Optional[float] = None,
+        risk_percent: Optional[float] = None,
+        capital: Optional[float] = None,
+        stop_loss_price: Optional[float] = None,
+        side: Optional[str] = None,
+        **kwargs: Any,
+    ) -> Any:
+        if capital is None:
+            capital = kwargs.get("balance", kwargs.get("account_balance"))
+
+        if stop_loss_price is None:
+            stop_loss_price = kwargs.get("stop_loss_price")
+
+        if risk_percent is None:
+            risk_percent = kwargs.get("risk_per_trade_percent")
+
+        entry = float(entry_price)
+        effective_stop = (
+            stop_loss_price
+            if stop_loss_price is not None
+            else stop_loss
+        )
+
+        if effective_stop is None:
+            raise TypeError("stop_loss or stop_loss_price is required")
+
+        stop = float(effective_stop)
+        capital_value = float(
+            self.capital if capital is None else capital
+        )
+
+        if entry <= 0 or stop <= 0 or capital_value <= 0:
+            raise ValueError("prices and capital must be positive")
+
+        risk_per_unit = abs(entry - stop)
+
+        if risk_per_unit == 0:
+            raise ValueError("entry and stop loss cannot be equal")
+
+        used_percent = float(
+            self.default_risk_per_trade_percent
+            if risk_percent is None
+            else risk_percent
+        )
+
+        if used_percent <= 0:
+            raise ValueError("risk_percent must be positive")
+
+        target_risk = capital_value * used_percent / 100.0
+        raw_units = target_risk / risk_per_unit
+        max_allocation = (
+            capital_value
+            * self.max_capital_allocation_percent
+            / 100.0
+        )
+        capped_units = max_allocation / entry
+        is_capped = raw_units > capped_units
+        units = min(raw_units, capped_units)
+
+        result = {
+            "units": float(units),
+            "allocated_capital": float(units * entry),
+            "risk_amount": float(units * risk_per_unit),
+            "is_capped": bool(is_capped),
+        }
+
+        if capital is not None or stop_loss_price is not None:
+            return result
+
+        return result["units"]
+
+    def validate_order(
+        self,
+        quantity: float,
+        price: float,
+        stop_loss: Optional[float] = None,
+        side: Optional[str] = None,
+        symbol: Optional[str] = None,
+    ) -> bool:
+        quantity_value = float(quantity)
+        price_value = float(price)
+
+        if not self.can_trade_today():
+
+========== 10) FAILING TESTS (AUTHORITATIVE API CONTRACT) ==========
+----- TEST FILE: tests/test_integrated_pipeline.py -----
+"""
+Tests for IntegratedTradingPipeline - AtriaTrade
+"""
+
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.core.integrated_pipeline import IntegratedTradingPipeline
+
+
+def test_pipeline_initialization():
+    pipeline = IntegratedTradingPipeline(initial_cash=10000.0, mode="paper")
+    status = pipeline.get_full_status()
+
+    assert status["mode"] == "paper"
+    assert status["equity"] == 10000.0
+    assert status["real_trading_enabled"] is False
+    assert status["order_submitted"] is False
+    print("PASS: test_pipeline_initialization")
+
+
+def test_integrated_buy_and_sell_flow():
+    def dummy_strategy(data):
+        return {"action": data.get("action", "HOLD"), "confidence": 0.95}
+
+    pipeline = IntegratedTradingPipeline(
+        initial_cash=10000.0,
+        fee_pct=0.1,
+        mode="paper",
+        strategy_callback=dummy_strategy,
+    )
+
+    # 1. Execute BUY
+    buy_res = pipeline.process_tick(
+        symbol="BTCUSDT",
+        price=50000.0,
+        quantity=0.1,
+        strategy_signal="BUY",
+    )
+    assert buy_res["action"] == "BUY"
+    assert buy_res["execution"]["status"] == "filled"
+    assert buy_res["order_submitted"] is False
+    assert pipeline.simulator.positions.get("BTCUSDT", 0.0) == 0.1
+
+    # 2. Execute SELL with profit
+    sell_res = pipeline.process_tick(
+        symbol="BTCUSDT",
+        price=55000.0,
+        quantity=0.1,
+        strategy_signal="SELL",
+    )
+    assert sell_res["action"] == "SELL"
+    assert sell_res["execution"]["status"] == "filled"
+    assert sell_res["execution"]["realized_pnl"] > 0
+    assert pipeline.simulator.positions.get("BTCUSDT", 0.0) == 0.0
+
+    print("PASS: test_integrated_buy_and_sell_flow")
+
+
+def test_emergency_circuit_breaker_blocks_trading():
+    def dummy_strategy(data):
+        return {"action": "BUY", "confidence": 0.9}
+
+    pipeline = IntegratedTradingPipeline(
+        initial_cash=10000.0,
+        mode="paper",
+        strategy_callback=dummy_strategy,
+    )
+
+    # Trigger emergency breaker
+    pipeline.recovery_manager.activate_emergency_stop("Safety trigger test")
+
+    res = pipeline.process_tick(
+        symbol="ETHUSDT",
+        price=2000.0,
+        quantity=1.0,
+        strategy_signal="BUY",
+    )
+
+    assert res["action"] == "HOLD"
+    assert res["order_submitted"] is False
+    assert pipeline.simulator.trade_count == 0
+
+    print("PASS: test_emergency_circuit_breaker_blocks_trading")
+
+
+def test_hold_decision_leaves_state_clean():
+    pipeline = IntegratedTradingPipeline(initial_cash=5000.0, mode="paper")
+
+    res = pipeline.process_tick(
+        symbol="SOLUSDT",
+        price=100.0,
+        quantity=1.0,
+        strategy_signal="HOLD",
+    )
+
+    assert res["action"] == "HOLD"
+    assert pipeline.simulator.trade_count == 0
+    assert pipeline.simulator.cash == 5000.0
+
+    print("PASS: test_hold_decision_leaves_state_clean")
+
+
+if __name__ == "__main__":
+    print("START: IntegratedTradingPipeline Tests")
+
+    test_pipeline_initialization()
+    test_integrated_buy_and_sell_flow()
+    test_emergency_circuit_breaker_blocks_trading()
+    test_hold_decision_leaves_state_clean()
+
+    print("ALL IntegratedTradingPipeline TESTS PASSED SUCCESSFULLY!")
+----- TEST FILE: tests/test_order_executor.py -----
+from src.core.order_executor import OrderExecutor
+
+
+def test_market_execution_flow():
+    print("[1] Initializing OrderExecutor...")
+    executor = OrderExecutor()
+
+    print("[2] Executing MARKET BUY order...")
+    result = executor.place_and_execute_market_order(
+        symbol="BTCUSDT",
+        side="BUY",
+        quantity=0.2,
+        current_price=50000.0,
+        sl=49000.0,
+        tp=52000.0,
+    )
+
+    assert result["order"]["status"] == "FILLED"
+    assert result["position"]["symbol"] == "BTCUSDT"
+    assert result["position"]["entry_price"] == 50000.0
+    assert result["position"]["size"] == 0.2
+    assert executor.position_tracker.get_position("BTCUSDT") is not None
+    print("-> Market order executed and position tracked successfully.")
+
+    print("=== MARKET EXECUTION TEST PASSED ===")
+
+
+def test_limit_order_trigger_flow():
+    print("[3] Testing LIMIT order triggering...")
+    executor = OrderExecutor()
+
+    # ثبت سفارش لیمیت خرید پایین‌تر از قیمت بازار
+    order = executor.order_manager.create_order(
+        symbol="ETHUSDT",
+        side="BUY",
+        order_type="LIMIT",
+        quantity=1.5,
+        price=2900.0,
+    )
+    assert order["status"] == "OPEN"
+
+    # قیمت جاری بالاتر است -> نباید Fill شود
+    executions = executor.evaluate_limit_orders("ETHUSDT", current_price=3000.0)
+    assert len(executions) == 0
+    assert executor.order_manager.get_order_status(order["order_id"]) == "OPEN"
+
+    # قیمت افت می‌کند و به تارگت لیمیت می‌رسد -> باید Fill شود
+    executions = executor.evaluate_limit_orders("ETHUSDT", current_price=2890.0)
+    assert len(executions) == 1
+    assert executions[0]["order"]["status"] == "FILLED"
+    assert executor.position_tracker.get_position("ETHUSDT") is not None
+    print("-> Limit order evaluated and triggered successfully.")
+
+    print("=== LIMIT EXECUTION TEST PASSED ===")
+
+
+if __name__ == "__main__":
+    test_market_execution_flow()
+    test_limit_order_trigger_flow()
+----- TEST FILE: tests/test_order_manager.py -----
+from src.core.order_manager import OrderManager
+
+
+def test_order_lifecycle():
+    print("[1] Creating OrderManager...")
+    manager = OrderManager()
+
+    print("[2] Creating LIMIT BUY order...")
+    order = manager.create_order(
+        symbol="BTCUSDT",
+        side="BUY",
+        order_type="LIMIT",
+        quantity=0.1,
+        price=50000.0,
+    )
+
+    assert order["symbol"] == "BTCUSDT"
+    assert order["side"] == "BUY"
+    assert order["order_type"] == "LIMIT"
+    assert order["quantity"] == 0.1
+    assert order["price"] == 50000.0
+    assert order["status"] == "OPEN"
+    print("-> Order created successfully.")
+
+    print("[3] Checking open orders...")
+    open_orders = manager.list_open_orders("BTCUSDT")
+
+    assert len(open_orders) == 1
+    assert open_orders[0]["order_id"] == order["order_id"]
+    assert manager.get_order_status(order["order_id"]) == "OPEN"
+    print("-> Open order status validated.")
+
+    print("[4] Testing duplicate order protection...")
+    try:
+        manager.create_order(
+            symbol="BTCUSDT",
+            side="BUY",
+            order_type="LIMIT",
+            quantity=0.1,
+            price=50000.0,
+        )
+        raise AssertionError("Duplicate order was not rejected.")
+    except ValueError as error:
+        assert "identical" in str(error).lower()
+
+    print("-> Duplicate order rejected successfully.")
+
+    print("[5] Filling order...")
+    filled_order = manager.fill_order(
+        order["order_id"],
+        fill_price=50100.0,
+    )
+
+    assert filled_order["status"] == "FILLED"
+    assert filled_order["fill_price"] == 50100.0
+    assert manager.list_open_orders("BTCUSDT") == []
+    print("-> Order filled successfully.")
+
+    print("[6] Creating and cancelling another order...")
+    second_order = manager.create_order(
+        symbol="ETHUSDT",
+        side="SELL",
+        order_type="LIMIT",
+        quantity=1.0,
+        price=3000.0,
+    )
+
+    cancelled_order = manager.cancel_order(second_order["order_id"])
+
+    assert cancelled_order["status"] == "CANCELLED"
+    assert manager.get_order_status(second_order["order_id"]) == "CANCELLED"
+    print("-> Order cancelled successfully.")
+
+    print("=== ORDER MANAGER TEST PASSED ===")
+
+
+def test_order_validation():
+    manager = OrderManager()
+
+    invalid_cases = [
+        {
+            "symbol": "BTCUSDT",
+            "side": "INVALID",
+            "order_type": "MARKET",
+            "quantity": 1.0,
+        },
+        {
+            "symbol": "BTCUSDT",
+            "side": "BUY",
+            "order_type": "LIMIT",
+            "quantity": 1.0,
+        },
+        {
+            "symbol": "BTCUSDT",
+            "side": "BUY",
+            "order_type": "MARKET",
+            "quantity": 0,
+        },
+    ]
+
+    for case in invalid_cases:
+        try:
+            manager.create_order(**case)
+            raise AssertionError("Invalid order was accepted.")
+        except ValueError:
+            pass
+
+    print("=== ORDER VALIDATION TEST PASSED ===")
+
+
+if __name__ == "__main__":
+    test_order_lifecycle()
+    test_order_validation()
+----- TEST FILE: tests/test_paper_session.py -----
+import os
+import json
+from src.core.risk_manager import RiskConfig
+from src.core.paper_session import PaperSession
+
+def test_paper_session_lifecycle():
+    print("[1] Initializing Paper Trading Session...")
+    config = RiskConfig(
+        risk_per_trade_pct=1.0,
+        stop_loss_pct=1.5,
+        take_profit_pct=3.0,
+        min_trade_value=10.0
+    )
+    session = PaperSession(
+        session_name="test_run",
+        initial_capital=10000.0,
+        risk_config=config,
+        data_dir="data/paper_trades"
+    )
+
+    print("[2] Executing Winning Trade (BTC @ 50,000 -> 51,500)...")
+    res1 = session.execute_paper_trade(
+        symbol="BTC/USDT",
+        side="buy",
+        entry_price=50000.0,
+        exit_price=51500.0
+    )
+    assert res1["status"] == "CLOSED", "Trade 1 should be closed successfully"
+    assert res1["pnl"] > 0, "Trade 1 must be profitable"
+    print(f"-> Trade 1 PNL: {res1['pnl']:.2f}")
+
+    print("[3] Executing Losing Trade (ETH @ 3,000 -> 2,900)...")
+    res2 = session.execute_paper_trade(
+        symbol="ETH/USDT",
+        side="buy",
+        entry_price=3000.0,
+        exit_price=2900.0
+    )
+    assert res2["status"] == "CLOSED", "Trade 2 should be closed successfully"
+    assert res2["pnl"] < 0, "Trade 2 must have a loss"
+    print(f"-> Trade 2 PNL: {res2['pnl']:.2f}")
+
+    print("[4] Validating Session Stats...")
+    stats = session.get_session_stats()
+    print(f"Total Trades: {stats['total_trades']}, Win Rate: {stats['win_rate_pct']}%")
+    assert stats["total_trades"] == 2
+    assert stats["win_rate_pct"] == 50.0
+
+    print("[5] Validating JSON persistence...")
+    json_path = "data/paper_trades/test_run.json"
+    assert os.path.exists(json_path), "JSON history file must exist"
+    with open(json_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+        assert len(data["trades"]) == 2
+    print("-> JSON file verified successfully.")
+
+    print("\n=== PAPER SESSION TEST PASSED ===")
+
+if __name__ == "__main__":
+    test_paper_session_lifecycle()
+----- TEST FILE: tests/test_position_tracker.py -----
+from src.core.position_tracker import PositionTracker
+
+
+def test_position_lifecycle():
+    print("[1] Initializing PositionTracker...")
+    tracker = PositionTracker()
+
+    print("[2] Opening Long position for BTCUSDT with SL and TP...")
+    pos = tracker.open_position(
+        symbol="BTCUSDT",
+        side="LONG",
+        entry_price=50000.0,
+        size=0.1,
+        sl=49000.0,
+        tp=53000.0,
+    )
+    assert pos["symbol"] == "BTCUSDT"
+    assert tracker.get_position("BTCUSDT") is not None
+    print("-> Position opened successfully.")
+
+    print("[3] Testing SL / TP triggers...")
+    assert tracker.check_sl_tp("BTCUSDT", 51000.0) is None
+    assert tracker.check_sl_tp("BTCUSDT", 48900.0) == "SL"
+    assert tracker.check_sl_tp("BTCUSDT", 53500.0) == "TP"
+    print("-> SL/TP logic validated.")
+
+    print("[4] Closing position...")
+    closed_pos = tracker.close_position("BTCUSDT", exit_price=52000.0)
+    assert closed_pos["exit_price"] == 52000.0
+    assert tracker.get_position("BTCUSDT") is None
+    print("-> Position closed successfully.")
+
+    print("=== POSITION TRACKER TEST PASSED ===")
+
+
+if __name__ == "__main__":
+    test_position_lifecycle()

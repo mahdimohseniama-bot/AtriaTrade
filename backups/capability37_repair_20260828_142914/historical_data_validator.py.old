@@ -1,0 +1,504 @@
+"""
+Historical OHLCV dataset validation for AtriaTrade.
+
+This module validates historical market data only.
+It does not execute trades and does not connect to any exchange.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+import math
+from typing import Any, Iterable, Mapping, Optional
+
+
+REQUIRED_FIELDS = (
+    "timestamp",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+)
+
+FIELD_ALIASES = {
+    "timestamp": ("timestamp", "time", "datetime", "date", "ts"),
+    "open": ("open", "o"),
+    "high": ("high", "h"),
+    "low": ("low", "l"),
+    "close": ("close", "c", "price"),
+    "volume": ("volume", "vol", "v"),
+}
+
+
+@dataclass(frozen=True)
+class ValidationIssue:
+    """A single validation error or warning."""
+
+    row: Optional[int]
+    field: Optional[str]
+    code: str
+    message: str
+    severity: str = "error"
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return a serializable representation of the issue."""
+        return {
+            "row": self.row,
+            "field": self.field,
+            "code": self.code,
+            "message": self.message,
+            "severity": self.severity,
+        }
+
+
+@dataclass
+class ValidationReport:
+    """Complete result of historical data validation."""
+
+    total_rows: int = 0
+    valid_rows: int = 0
+    invalid_rows: int = 0
+    normalized_rows: list[dict[str, Any]] = field(default_factory=list)
+    issues: list[ValidationIssue] = field(default_factory=list)
+    duplicate_timestamps: list[datetime] = field(default_factory=list)
+    gaps: list[tuple[datetime, datetime, float]] = field(
+        default_factory=list
+    )
+
+    @property
+    def error_count(self) -> int:
+        """Number of errors in the report."""
+        return sum(
+            issue.severity == "error"
+            for issue in self.issues
+        )
+
+    @property
+    def warning_count(self) -> int:
+        """Number of warnings in the report."""
+        return sum(
+            issue.severity == "warning"
+            for issue in self.issues
+        )
+
+    @property
+    def is_valid(self) -> bool:
+        """
+        Whether the dataset contains no blocking errors.
+
+        Warnings, such as time gaps, do not make the report invalid.
+        """
+        return self.error_count == 0
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return a JSON-friendly report."""
+        return {
+            "total_rows": self.total_rows,
+            "valid_rows": self.valid_rows,
+            "invalid_rows": self.invalid_rows,
+            "is_valid": self.is_valid,
+            "error_count": self.error_count,
+            "warning_count": self.warning_count,
+            "duplicate_timestamps": [
+                timestamp.isoformat()
+                for timestamp in self.duplicate_timestamps
+            ],
+            "gaps": [
+                {
+                    "from": start start.isoformat(),
+                    "to": end.isoformat(),
+                    "seconds": seconds                }
+                for start, end, seconds in self.gaps
+            ],
+            "issues": [
+                issue.as_dict()
+                for issue in self.issues
+            ],
+        }
+
+
+class HistoricalDataValidationError(ValueError):
+    """Raised when strict validation finds one or more errors."""
+
+    def __init__(self, report: ValidationReport) -> None:
+        self.report = report
+        message = (
+            "Historical data is invalid: "
+            f"{report.error_count} error(s), "
+            f"{report.warning_count} warning(s)"
+        )
+        super().__init__(message)
+
+
+class HistoricalDataValidator:
+    """
+    Validate and normalize OHLCV historical data.
+
+    Accepted input types:
+    - one mapping/dictionary representing one candle
+    - iterable of mappings
+    - pandas-like DataFrame with to_dict()
+    """
+
+    def __init__(
+        self,
+        interval_seconds: Optional[float] = None,
+        require_positive_volume: bool = True,
+    ) -> None:
+        if (
+            interval_seconds is not None
+            and interval_seconds <= 0
+        ):
+            raise ValueError(
+                "interval_seconds must be greater than zero"
+            )
+
+        self.interval_seconds = interval_seconds
+        self.require_positive_volume = require_positive_volume
+
+    def validate(
+        self,
+        data: Any,
+        *,
+        raise_on_error: bool = False,
+    ) -> ValidationReport:
+        """Validate data and return a detailed report."""
+        rows = list(self._to_records(data))
+        report = ValidationReport(total_rows=len(rows))
+
+        if not rows:
+            report.issues.append(
+                ValidationIssue(
+                    row=None,
+                    field=None,
+                    code="empty_dataset",
+                    message="Dataset is empty",
+                )
+            )
+
+            if raise_on_error:
+                raise HistoricalDataValidationError(report)
+
+            return report
+
+        seen_timestamps: set[datetime] = set()
+        previous_timestamp: Optional[datetime] = None
+
+        for row_number, row in enumerate(rows, start=1):
+            normalized, row_issues = self._validate_row(
+                row,
+                row_number,
+            )
+
+            report.issues.extend(row_issues)
+
+            if normalized is None:
+                report.invalid_rows += )
+
+            if normalized is None:
+                report.invalid_rows +=  if timestamp in seen_timestamps:
+                report.duplicate_timestamps.append(timestamp)
+                report.issues.append(
+                    ValidationIssue(
+                        row=row_number,
+                        field="timestamp",
+                        code="duplicate_timestamp",
+                        message=(
+                            "Duplicate timestamp: "
+                            f"{timestamp.isoformat()}"
+                        ),
+                    )
+                )
+
+            if (
+                previous_timestamp is not None
+                and timestamp < previous_timestamp
+            ):
+                report.issues.append(
+                    ValidationIssue(
+                        row=row_number,
+                        field="timestamp",
+                        code="out_of_order",
+                        message=(
+                            "Timestamp is earlier than the previous row: "
+                            f"{timestamp.isoformat()} < "
+                            f"{previous_timestamp.isoformat()}"
+                        ),
+                    )
+                )
+
+            if (
+                self.interval_seconds is not None
+                and previous_timestamp is not None
+            ):
+                difference = (
+                    timestamp - previous_timestamp
+                ).total_seconds()
+
+                if difference > self.interval_seconds:
+                    report.gaps.append(
+                        (
+                            previous_timestamp,
+                            timestamp,
+                            difference,
+                        )
+                    )
+                    report.issues.append(
+                        ValidationIssue(
+                            row=row_number,
+                            field="timestamp",
+                            code="time_gap",
+                            message=(
+                                f"Time gap detected: {difference} seconds; "
+                                f"expected {self.interval_seconds} seconds"
+                            ),
+                            severity="warning",
+                        )
+                    )
+
+            seen_timestamps.add(timestamp)
+            previous_timestamp = timestamp
+            report.normalized_rows.append(normalized)
+            report.valid_rows += 1
+
+        if raise_on_error and not report.is_valid:
+            raise HistoricalDataValidationError(report)
+
+        return report
+
+    @staticmethod
+    def _to_records(data: Any) -> Iterable[Any]:
+        """Convert supported input types into row records."""
+        if hasattr(data, "to_dict"):
+            try:
+                return data.to_dict(orient="records")
+            except TypeError:
+                return data.to_dict("records")
+
+        if isinstance(data, Mapping):
+            return [data]
+
+        try:
+            return list(data)
+        except TypeError as exc:
+            raise TypeError(
+                "data must be a mapping, iterable, "
+                "or DataFrame-like object"
+            ) from exc
+
+    def _validate_row(
+        self,
+        row: Any,
+        row_number: int,
+    ) -> tuple[
+        Optional[dict[str, Any]],
+        list[ValidationIssue],
+    ]:
+        """Validate and normalize one OHLCV row."""
+        issues: list[ValidationIssue] = []
+
+        if not isinstance(row, Mapping):
+            issues.append(
+                ValidationIssue(
+                    row=row_number,
+                    field=None,
+                    code="invalid_row_type",
+                    message="Each row must be a mapping/dictionary",
+                )
+            )
+            return None, issues
+
+        source = {
+            str(key).strip().lower(): value
+            for key, value in row.items()
+        }
+
+        values: dict[str, Any] = {}
+
+        for field_name in REQUIRED_FIELDS:
+            found = False
+
+            for alias in FIELD_ALIASES[field_name]:
+                if alias in source:
+                    values[field_name] = source[alias]
+                    found = True
+                    break
+
+            if not found:
+                issues.append(
+                    ValidationIssue(
+                        row=row_number,
+                        field=field_name,
+                        code="missing_field",
+                        message=(
+                            "Required field is missing: "
+                            f"{field_name}"
+                        ),
+                    )
+                )
+
+        if issues:
+            return None, issues
+
+        timestamp = self._parse_timestamp(values["timestamp"])
+
+        if timestamp is None:
+            issues.append(
+                ValidationIssue(
+                    row=row_number,
+                    field="timestamp",
+                    code="invalid_timestamp",
+                    message="Timestamp is missing or invalid",
+                )
+            )
+
+        numeric: dict[str, float] = {}
+
+        for field_name in (
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+        ):
+            try:
+                numeric[field_name] = float(values[field_name])
+            except (TypeError, ValueError):
+                issues.append(
+                    ValidationIssue(
+                        row=row_number,
+                        field=field_name,
+                        code="non_numeric",
+                        message=f"{field_name} must be numeric",
+                    )
+                )
+                continue
+
+            if not math.isfinite(numeric[field_name]):
+                issues.append(
+                    ValidationIssue(
+                        row=row_number,
+                        field=field_name,
+                        code="non_finite",
+                        message=f"{field_name} must be finite",
+                    )
+                )
+
+        if issues:
+            return None, issues
+
+        if any(
+            numeric[field_name] <= 0
+            for field_name in (
+                "open",
+                "high",
+                "low",
+                "close",
+            )
+        ):
+            issues.append(
+                ValidationIssue(
+                    row=row_number,
+                    field="price",
+                    code="non_positive_price",
+                    message="OHLC prices must be greater than zero",
+                )
+            )
+
+        if (
+            self.require_positive_volume
+            and numeric["volume"] <= 0
+        ):
+            issues.append(
+                ValidationIssue(
+                    row=row_number,
+                    field="volume",
+                    code="non_positive_volume",
+                    message="Volume must be greater than zero",
+                )
+            )
+
+        if numeric["high"] < max(
+            numeric["open"],
+            numeric["close"],
+        ):
+            issues.append(
+                ValidationIssue(
+                    row=row_number,
+                    field="high",
+                    code="invalid_high",
+                    message="High must be greater than or equal to open and close",
+                )
+            )
+
+        if numeric["low"] > min(
+            numeric["open"],
+            numeric["close"],
+        ):
+            issues.append(
+                ValidationIssue(
+                    row=row_number,
+                    field="low",
+                    code="invalid_low",
+                    message="Low must be less than or equal to open and close",
+                )
+            )
+
+        if issues:
+            return None, issues
+
+        return {
+            "timestamp": timestamp,
+            "open": numeric["open"],
+            "high": numeric["high"],
+            "low": numeric["low"],
+            "close": numeric["close"],
+            "volume": numeric["volume"],
+        }, issues
+
+    @staticmethod
+    def _parse_timestamp(value: Any) -> Optional[datetime]:
+        """Parse timestamp into timezone-aware UTC datetime."""
+        if value is None:
+            return None
+
+        if isinstance(value, datetime):
+            parsed = value
+        elif (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+        ):
+            try:
+                parsed = datetime.fromtimestamp(
+                    float(value),
+                    tz=timezone.utc,
+                )
+            except (OverflowError, OSError, ValueError):
+                return None
+        else:
+            text = str(value).strip()
+
+            if not text:
+                return None
+
+            try:
+                parsed = datetime.fromisoformat(
+                    text.replace("Z", "+00:00")
+                )
+            except ValueError:
+                return None
+
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+
+        return parsed.astimezone(timezone.utc)
+
+
+__all__ = [
+    "HistoricalDataValidationError",
+    "HistoricalDataValidator",
+    "ValidationIssue",
+    "ValidationReport",
+]

@@ -1,0 +1,32 @@
+{
+  "session_id": "test_run",
+  "session_name": "test_run",
+  "currency": "USDT",
+  "initial_capital": 10000.0,
+  "current_capital": 10140.0,
+  "total_pnl": 140.0,
+  "created_at": "2026-09-16T19:55:40+00:00",
+  "updated_at": "2026-09-16T19:55:40+00:00",
+  "trades": [
+    {
+      "symbol": "BTC/USDT",
+      "side": "BUY",
+      "entry_price": 50000.0,
+      "exit_price": 51500.0,
+      "size": 0.1,
+      "quantity": 0.1,
+      "pnl": 150.0,
+      "status": "CLOSED"
+    },
+    {
+      "symbol": "ETH/USDT",
+      "side": "BUY",
+      "entry_price": 3000.0,
+      "exit_price": 2900.0,
+      "size": 0.1,
+      "quantity": 0.1,
+      "pnl": -10.0,
+      "status": "CLOSED"
+    }
+  ]
+}

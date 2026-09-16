@@ -1,0 +1,636 @@
+===== src/web/app.py =====
+     1	# -*- coding: utf-8 -*-
+     2	"""
+     3	AtriaTrade Web App
+     4	- Serves the dashboard UI
+     5	- Keeps current backend APIs
+     6	- Paper-trading safe only
+     7	"""
+     8	
+     9	from __future__ import annotations
+    10	
+    11	import os
+    12	import time
+    13	from typing import Any, Optional
+    14	
+    15	import uvicorn
+    16	from fastapi import Depends, FastAPI, HTTPException, Request
+    17	from fastapi.responses import HTMLResponse
+    18	from fastapi.security import APIKeyHeader
+    19	from fastapi.staticfiles import StaticFiles
+    20	from fastapi.templating import Jinja2Templates
+    21	from pydantic import BaseModel, Field
+    22	
+    23	# ---------------------------------------------------------------------
+    24	# Project imports
+    25	# ---------------------------------------------------------------------
+    26	try:
+    27	    from src.dashboard.server import DashboardServer
+    28	    from src.dashboard.auth import SecureAuthManager
+    29	except ImportError as e:
+    30	    print(f"❌ ImportError: Could not import dashboard components. {e}")
+    31	    print("   Please ensure:")
+    32	    print("   1. You are running this script from the root directory of AtriaTrade (~/AtriaTrade).")
+    33	    print("   2. The directory structure includes src/dashboard/server.py and src/dashboard/auth.py.")
+    34	    raise
+    35	
+    36	# ---------------------------------------------------------------------
+    37	# Configuration
+    38	# ---------------------------------------------------------------------
+    39	AUTH_TOKEN_HEADER_NAME = "X-Auth-Token"
+    40	ADMIN_TOKEN_FOR_TEST = "SET_YOUR_ADMIN_TOKEN_HERE"  # replace with a real token if needed
+    41	
+    42	WEB_DIR = os.path.dirname(os.path.abspath(__file__))
+    43	TEMPLATES_DIR = os.path.join(WEB_DIR, "templates")
+    44	STATIC_DIR = os.path.join(WEB_DIR, "static")
+    45	
+    46	# ---------------------------------------------------------------------
+    47	# Auth / dashboard backend
+    48	# ---------------------------------------------------------------------
+    49	auth_manager = SecureAuthManager()
+    50	dashboard_server = DashboardServer(auth_manager=auth_manager)
+    51	
+    52	# ---------------------------------------------------------------------
+    53	# FastAPI app
+    54	# ---------------------------------------------------------------------
+    55	app = FastAPI(
+    56	    title="AtriaTrade Dashboard API",
+    57	    description="API for managing and monitoring the AtriaTrade bot. Paper-trading safe.",
+    58	    version="1.2.0",
+    59	)
+    60	
+    61	api_key_header = APIKeyHeader(name=AUTH_TOKEN_HEADER_NAME, auto_error=True)
+    62	
+    63	templates = Jinja2Templates(directory=TEMPLATES_DIR)
+    64	
+    65	if os.path.isdir(STATIC_DIR):
+    66	    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+    67	
+    68	
+    69	# ---------------------------------------------------------------------
+    70	# Helpers
+    71	# ---------------------------------------------------------------------
+    72	def get_client_ip(request: Request) -> str:
+    73	    if request.client and request.client.host:
+    74	        return request.client.host
+    75	
+    76	    forwarded_for = request.headers.get("X-Forwarded-For")
+    77	    if forwarded_for:
+    78	        return forwarded_for.split(",")[0].strip()
+    79	
+    80	    return "127.0.0.1"
+    81	
+    82	
+    83	def require_auth_token(token: str) -> None:
+    84	    if token == ADMIN_TOKEN_FOR_TEST:
+    85	        return
+    86	    # If you later generate dynamic tokens with SecureAuthManager,
+    87	    # the dashboard_server layer can validate them.
+    88	    # This fallback keeps local development simple.
+    89	    raise HTTPException(
+    90	        status_code=401,
+    91	        detail={"message": "Unauthorized. Invalid or expired token."},
+    92	    )
+    93	
+    94	
+    95	# ---------------------------------------------------------------------
+    96	# Models
+    97	# ---------------------------------------------------------------------
+    98	class PublicStatusResponse(BaseModel):
+    99	    system: str = Field(..., description="System name")
+   100	    online: bool = Field(..., description="System online state")
+   101	    timestamp: float = Field(..., description="Unix time")
+   102	
+   103	
+   104	class BotStateData(BaseModel):
+   105	    status: str
+   106	    mode: str
+   107	    active_positions: int
+   108	    total_balance_usdt: float
+   109	    profit_reserved: float
+   110	
+   111	
+   112	class DashboardSummaryResponse(BaseModel):
+   113	    success: bool
+   114	    user: Optional[str] = None
+   115	    role: Optional[str] = None
+   116	    data: Optional[BotStateData] = None
+   117	    error: Optional[str] = None
+   118	
+   119	
+   120	class UpdateBotStateResponse(BaseModel):
+   121	    success: bool
+   122	    updated_key: Optional[str] = None
+   123	    new_value: Optional[Any] = None
+   124	    error: Optional[str] = None
+   125	
+   126	
+   127	# ---------------------------------------------------------------------
+   128	# UI routes
+   129	# ---------------------------------------------------------------------
+   130	@app.get("/", response_class=HTMLResponse)
+   131	async def root(request: Request):
+   132	    return templates.TemplateResponse(
+   133	        "dashboard.html",
+   134	        {"request": request, "page_title": "AtriaTrade Dashboard"},
+   135	    )
+   136	
+   137	
+   138	@app.get("/dashboard", response_class=HTMLResponse)
+   139	async def dashboard_page(request: Request):
+   140	    return templates.TemplateResponse(
+   141	        "dashboard.html",
+   142	        {"request": request, "page_title": "AtriaTrade Dashboard"},
+   143	    )
+   144	
+   145	
+   146	# ---------------------------------------------------------------------
+   147	# API routes
+   148	# ---------------------------------------------------------------------
+   149	@app.get(
+   150	    "/api/public/status",
+   151	    response_model=PublicStatusResponse,
+   152	    summary="Get Public System Status",
+   153	    tags=["Public Endpoints"],
+   154	)
+   155	async def get_public_status_endpoint(request: Request):
+   156	    return PublicStatusResponse(
+   157	        system="AtriaTrade API",
+   158	        online=True,
+   159	        timestamp=time.time(),
+   160	    )
+   161	
+   162	
+   163	@app.get(
+   164	    "/api/dashboard/summary",
+   165	    response_model=DashboardSummaryResponse,
+   166	    summary="Get Authenticated Dashboard Summary",
+   167	    tags=["Dashboard API"],
+   168	    dependencies=[Depends(api_key_header)],
+   169	)
+   170	async def get_dashboard_summary_endpoint(
+   171	    request: Request,
+   172	    token: str = Depends(api_key_header),
+   173	):
+   174	    client_ip = get_client_ip(request)
+   175	
+   176	    if token != ADMIN_TOKEN_FOR_TEST:
+   177	        # Try backend validation if a real token system is available
+   178	        result = await dashboard_server.get_dashboard_summary(
+   179	            token=token,
+   180	            client_ip=client_ip,
+   181	        )
+   182	        if not result.get("success", False):
+   183	            raise HTTPException(
+   184	                status_code=401,
+   185	                detail={"message": result.get("error", "Authentication failed.")},
+   186	            )
+   187	
+   188	        bot_data = None
+   189	        if result.get("data"):
+   190	            try:
+   191	                bot_data = BotStateData(**result["data"])
+   192	            except Exception as e:
+   193	                raise HTTPException(
+   194	                    status_code=500,
+   195	                    detail={"message": f"Failed to parse dashboard data: {e}"},
+   196	                )
+   197	
+   198	        return DashboardSummaryResponse(
+   199	            success=True,
+   200	            user=result.get("user"),
+   201	            role=result.get("role"),
+   202	            data=bot_data,
+   203	        )
+   204	
+   205	    # Local dev fallback
+   206	    return DashboardSummaryResponse(
+   207	        success=True,
+   208	        user="admin",
+   209	        role="admin",
+   210	        data=BotStateData(
+   211	            status="RUNNING",
+   212	            mode="PAPER_TRADING",
+   213	            active_positions=0,
+   214	            total_balance_usdt=0.0,
+   215	            profit_reserved=0.0,
+   216	        ),
+   217	    )
+   218	
+   219	
+   220	@app.put(
+   221	    "/api/bot/state",
+   222	    response_model=UpdateBotStateResponse,
+   223	    summary="Update Bot State Parameter",
+   224	    tags=["Admin Control"],
+   225	    dependencies=[Depends(api_key_header)],
+   226	)
+   227	async def update_bot_state_endpoint(
+   228	    request: Request,
+   229	    key: str,
+   230	    value: Any,
+   231	    token: str = Depends(api_key_header),
+   232	):
+   233	    if token != ADMIN_TOKEN_FOR_TEST:
+   234	        client_ip = get_client_ip(request)
+   235	        result = await dashboard_server.update_bot_state(
+   236	            key=key,
+   237	            value=value,
+   238	            token=token,
+   239	            client_ip=client_ip,
+   240	        )
+   241	        if not result.get("success", False):
+   242	            raise HTTPException(
+   243	                status_code=403,
+   244	                detail={"message": result.get("error", "Unknown error during state update.")},
+   245	            )
+   246	        return UpdateBotStateResponse(
+   247	            success=True,
+   248	            updated_key=result.get("updated_key"),
+   249	            new_value=result.get("new_value"),
+   250	        )
+   251	
+   252	    # Safe local fallback: do not change live trading state
+   253	    return UpdateBotStateResponse(
+   254	        success=True,
+   255	        updated_key=key,
+   256	        new_value=value,
+   257	    )
+   258	
+   259	
+   260	# ---------------------------------------------------------------------
+   261	# Run server
+   262	# ---------------------------------------------------------------------
+   263	if __name__ == "__main__":
+   264	    HOST = "127.0.0.1"
+   265	    PORT = 8080
+   266	
+   267	    print("\n" + "=" * 60)
+   268	    print("🚀 Starting AtriaTrade Dashboard API Server...")
+   269	    print(f"   Host: {HOST}")
+   270	    print(f"   Port: {PORT}")
+   271	    print(f"   Docs: http://{HOST}:{PORT}/docs")
+   272	    print(f"   ReDoc: http://{HOST}:{PORT}/redoc")
+   273	    print("=" * 60 + "\n")
+   274	
+   275	    uvicorn.run(
+   276	        "src.web.app:app",
+   277	        host=HOST,
+   278	        port=PORT,
+   279	        reload=True,
+   280	    )
+===== src/web/templates/index.html =====
+     1	<!DOCTYPE html>
+     2	<html lang="fa" dir="rtl">
+     3	<head>
+     4	    <meta charset="UTF-8">
+     5	    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+     6	    <title>AtriaTrade Dashboard</title>
+     7	    <script src="https://cdn.tailwindcss.com"></script>
+     8	    <style>body { background-color: #0f172a; color: #f8fafc; font-family: Tahoma, sans-serif; }</style>
+     9	</head>
+    10	<body class="p-6">
+    11	    <div class="max-w-4xl mx-auto">
+    12	        <header class="flex justify-between items-center border-b border-gray-700 pb-4 mb-6">
+    13	            <div>
+    14	                <h1 class="text-3xl font-bold text-blue-400">AtriaTrade</h1>
+    15	                <p class="text-sm text-gray-400 mt-1">Dashboard</p>
+    16	            </div>
+    17	            <div class="bg-green-900 text-green-300 px-4 py-2 rounded-lg text-sm font-bold border border-green-700">🟢 {{ status }}</div>
+    18	        </header>
+    19	        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+    20	            <div class="bg-gray-800 p-5 rounded-xl border border-gray-700">
+    21	                <h2 class="text-xl mb-3 border-b border-gray-600 pb-2">وضعیت سیستم</h2>
+    22	                <p id="health-status" class="text-gray-400">در حال اتصال...</p>
+    23	            </div>
+    24	        </div>
+    25	    </div>
+    26	    <script>
+    27	        fetch('/health').then(res => res.json()).then(data => {
+    28	            document.getElementById('health-status').innerHTML = `وضعیت API: <span class="text-green-400">متصل</span><br>حالت: ${data.mode}`;
+    29	        }).catch(() => {
+    30	            document.getElementById('health-status').innerHTML = '<span class="text-red-500">خطا در ارتباط</span>';
+    31	        });
+    32	    </script>
+    33	</body>
+    34	</html>
+===== src/core/trading_engine.py =====
+     1	"""Trading Engine module for orchestrating signals, execution, and portfolio management."""
+     2	from typing import Dict, Any, Optional
+     3	import time
+     4	
+     5	
+     6	class TradingEngine:
+     7	    def __init__(
+     8	        self,
+     9	        portfolio_manager: Optional[Any] = None,
+    10	        risk_manager: Optional[Any] = None,
+    11	        order_executor: Optional[Any] = None,
+    12	        profit_reserve_manager: Optional[Any] = None,
+    13	        **kwargs
+    14	    ):
+    15	        # نگاشت سازگار برای پارامترهای تستی و ماژولار
+    16	        self.portfolio_manager = portfolio_manager or kwargs.get("portfolio")
+    17	        self.risk_manager = risk_manager or kwargs.get("risk")
+    18	        self.order_executor = order_executor or kwargs.get("executor")
+    19	        self.profit_reserve_manager = profit_reserve_manager or kwargs.get("reserve")
+    20	
+    21	        self.is_running = False
+    22	        self.last_tick_time = 0.0
+    23	        self._entry_prices: Dict[str, float] = {}
+    24	
+    25	    def start(self) -> None:
+    26	        self.is_running = True
+    27	
+    28	    def stop(self) -> None:
+    29	        self.is_running = False
+    30	
+    31	    def process_tick(self, tick: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    32	        """Processes an incoming market tick and executes simulated paper trades."""
+    33	        if not self.is_running:
+    34	            return None
+    35	
+    36	        if not isinstance(tick, dict):
+    37	            return None
+    38	
+    39	        symbol = tick.get("symbol")
+    40	        price = tick.get("price")
+    41	        signal = tick.get("signal")
+    42	        confidence = tick.get("confidence", 1.0)
+    43	
+    44	        if not symbol or price is None or price <= 0:
+    45	            return None
+    46	
+    47	        if signal not in ["BUY", "SELL", "HOLD"]:
+    48	            return None
+    49	
+    50	        if signal == "HOLD":
+    51	            return None
+    52	
+    53	        self.last_tick_time = time.time()
+    54	
+    55	        if signal == "BUY":
+    56	            qty = tick.get("quantity") or tick.get("qty")
+    57	            if not qty:
+    58	                # محاسبه حجم پیش‌فرض بر اساس پورتفولیو
+    59	                if self.portfolio_manager and hasattr(self.portfolio_manager, "cash"):
+    60	                    alloc_cash = self.portfolio_manager.cash * 0.5
+    61	                    qty = alloc_cash / price
+    62	                else:
+    63	                    qty = 0.1
+    64	
+    65	            # بررسی و ثبت خرید
+    66	            if self.portfolio_manager:
+    67	                if hasattr(self.portfolio_manager, "can_allocate"):
+    68	                    if not self.portfolio_manager.can_allocate(symbol, qty * price):
+    69	                        return None
+    70	
+    71	                buy_res = {}
+    72	                if hasattr(self.portfolio_manager, "record_buy"):
+    73	                    buy_res = self.portfolio_manager.record_buy(symbol=symbol, quantity=qty, price=price) or {}
+    74	                if isinstance(buy_res, dict) and buy_res.get("status") == "REJECTED":
+    75	                    return None
+    76	
+    77	            self._entry_prices[symbol] = float(price)
+    78	
+    79	            return {
+    80	                "symbol": symbol,
+    81	                "side": "BUY",
+    82	                "price": price,
+    83	                "quantity": qty,
+    84	                "status": "FILLED",
+    85	                "timestamp": self.last_tick_time
+    86	            }
+    87	
+    88	        elif signal == "SELL":
+    89	            current_qty = 0.0
+    90	            if self.portfolio_manager:
+    91	                if hasattr(self.portfolio_manager, "get_position"):
+    92	                    current_qty = self.portfolio_manager.get_position(symbol)
+    93	                elif hasattr(self.portfolio_manager, "positions"):
+    94	                    pos = self.portfolio_manager.positions.get(symbol, {})
+    95	                    if isinstance(pos, dict):
+    96	                        current_qty = pos.get("quantity", 0.0)
+    97	                    else:
+    98	                        current_qty = getattr(pos, "quantity", 0.0)
+    99	
+   100	            if current_qty <= 0.0:
+   101	                return None
+   102	
+   103	            qty_to_sell = tick.get("quantity") or tick.get("qty") or current_qty
+   104	            qty_to_sell = min(qty_to_sell, current_qty)
+   105	
+   106	            sell_res = {}
+   107	            if self.portfolio_manager and hasattr(self.portfolio_manager, "record_sell"):
+   108	                sell_res = self.portfolio_manager.record_sell(symbol=symbol, quantity=qty_to_sell, price=price) or {}
+   109	
+   110	            # محاسبه سود محقق‌شده
+   111	            realized_pnl = 0.0
+   112	            if isinstance(sell_res, dict) and "realized_pnl" in sell_res:
+   113	                realized_pnl = float(sell_res["realized_pnl"])
+   114	            else:
+   115	                entry_p = self._entry_prices.get(symbol, price)
+   116	                realized_pnl = (float(price) - float(entry_p)) * float(qty_to_sell)
+   117	
+   118	            # اگر از طریق محاسبات پورتفولیو هم سود مثبت بود ولی صفر گزارش شده بود:
+   119	            if realized_pnl <= 0.0 and symbol in self._entry_prices:
+   120	                entry_p = self._entry_prices[symbol]
+   121	                if price > entry_p:
+   122	                    realized_pnl = (float(price) - float(entry_p)) * float(qty_to_sell)
+   123	
+   124	            # انتقال سود به ProfitReserveManager
+   125	            if realized_pnl > 0.0 and self.profit_reserve_manager:
+   126	                reserve = self.profit_reserve_manager
+   127	                if hasattr(reserve, "add_to_vault") and callable(reserve.add_to_vault):
+   128	                    reserve.add_to_vault(realized_pnl)
+   129	                elif hasattr(reserve, "process_trade_profit") and callable(reserve.process_trade_profit):
+   130	                    reserve.process_trade_profit(realized_pnl)
+   131	                elif hasattr(reserve, "process_trade_pnl") and callable(reserve.process_trade_pnl):
+   132	                    reserve.process_trade_pnl(realized_pnl)
+   133	                elif hasattr(reserve, "deposit") and callable(reserve.deposit):
+   134	                    reserve.deposit(realized_pnl)
+   135	                elif hasattr(reserve, "record_profit") and callable(reserve.record_profit):
+   136	                    reserve.record_profit(realized_pnl)
+   137	                else:
+   138	                    cur_v = getattr(reserve, "vault_balance", 0.0) or 0.0
+   139	                    setattr(reserve, "vault_balance", float(cur_v) + realized_pnl)
+   140	
+   141	            return {
+   142	                "symbol": symbol,
+   143	                "side": "SELL",
+   144	                "price": price,
+   145	                "quantity": qty_to_sell,
+   146	                "realized_pnl": realized_pnl,
+   147	                "status": "FILLED",
+   148	                "timestamp": self.last_tick_time
+   149	            }
+   150	
+   151	        return None
+===== src/core/portfolio_manager.py =====
+     1	import logging
+     2	from typing import Dict, Any, Optional
+     3	
+     4	logger = logging.getLogger(__name__)
+     5	
+     6	class PortfolioManager:
+     7	    def __init__(self, initial_cash: float = 10000.0, max_asset_weight: float = 0.5, **kwargs):
+     8	        self.cash: float = float(kwargs.get("initial_balance", initial_cash))
+     9	        self.max_asset_weight: float = float(max_asset_weight)
+    10	        self.positions: Dict[str, Dict[str, float]] = {}
+    11	        self.peak_equity: float = self.cash
+    12	        self.equity: float = self.cash
+    13	        self.drawdown: float = 0.0
+    14	        self.realized_pnl: float = 0.0
+    15	        self.trade_count: int = 0
+    16	
+    17	    @property
+    18	    def holdings(self) -> Dict[str, Dict[str, float]]:
+    19	        return self.positions
+    20	
+    21	    def get_balance(self) -> float:
+    22	        return self.cash
+    23	
+    24	    def get_position(self, symbol: str) -> float:
+    25	        pos = self.positions.get(symbol, 0.0)
+    26	        if isinstance(pos, dict):
+    27	            return float(pos.get("quantity", 0.0))
+    28	        return float(pos)
+    29	
+    30	    def get_holding_quantity(self, symbol: str) -> float:
+    31	        return self.get_position(symbol)
+    32	
+    33	    def get_equity(self, current_prices: Optional[Dict[str, float]] = None) -> float:
+    34	        if current_prices is None:
+    35	            current_prices = {}
+    36	        total = self.cash
+    37	        for sym, pos in self.positions.items():
+    38	            qty = pos.get("quantity", 0.0) if isinstance(pos, dict) else float(pos)
+    39	            price = current_prices.get(sym, pos.get("avg_price", 0.0) if isinstance(pos, dict) else 0.0)
+    40	            total += qty * price
+    41	        self.equity = total
+    42	        if total > self.peak_equity:
+    43	            self.peak_equity = total
+    44	        self.calculate_drawdown(self.equity)
+    45	        return self.equity
+    46	
+    47	    def calculate_total_equity(self, current_prices: Optional[Dict[str, float]] = None) -> float:
+    48	        return self.get_equity(current_prices)
+    49	
+    50	    def calculate_drawdown(self, equity_val: Optional[Any] = None) -> float:
+    51	        if isinstance(equity_val, (int, float)):
+    52	            current_eq = float(equity_val)
+    53	        elif isinstance(equity_val, dict):
+    54	            current_eq = self.get_equity(equity_val)
+    55	        else:
+    56	            current_eq = self.equity
+    57	
+    58	        if self.peak_equity <= 0:
+    59	            self.drawdown = 0.0
+    60	            return 0.0
+    61	
+    62	        dd = ((self.peak_equity - current_eq) / self.peak_equity) * 100.0
+    63	        self.drawdown = max(0.0, dd)
+    64	        return self.drawdown
+    65	
+    66	    def get_summary(self, current_prices: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
+    67	        equity = self.get_equity(current_prices)
+    68	        dd_pct = self.calculate_drawdown(equity)
+    69	        return {
+    70	            "cash": self.cash,
+    71	            "total_equity": equity,
+    72	            "equity": equity,
+    73	            "drawdown": dd_pct / 100.0,
+    74	            "drawdown_pct": dd_pct,
+    75	            "peak_equity": self.peak_equity,
+    76	            "realized_pnl": self.realized_pnl,
+    77	            "trade_count": self.trade_count,
+    78	            "positions": self.positions
+    79	        }
+    80	
+    81	    def can_allocate(self, symbol: str, amount: float, current_prices: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
+    82	        equity = self.get_equity(current_prices)
+    83	        max_allowed = equity * self.max_asset_weight
+    84	        current_holding_val = 0.0
+    85	        if symbol in self.positions:
+    86	            pos = self.positions[symbol]
+    87	            qty = pos.get("quantity", 0.0) if isinstance(pos, dict) else float(pos)
+    88	            px = (current_prices or {}).get(symbol, pos.get("avg_price", 0.0) if isinstance(pos, dict) else 0.0)
+    89	            current_holding_val = qty * px
+    90	
+    91	        if (current_holding_val + amount) > max_allowed:
+    92	            return {
+    93	                "allowed": False,
+    94	                "reason": f"Exceeds max asset weight limit ({self.max_asset_weight * 100}%)"
+    95	            }
+    96	        if amount > self.cash:
+    97	            return {
+    98	                "allowed": False,
+    99	                "reason": "Insufficient cash balance"
+   100	            }
+   101	        return {"allowed": True, "reason": "OK"}
+   102	
+   103	    def record_buy(self, symbol: str, quantity: float, price: float, fee: float = 0.0) -> Dict[str, Any]:
+   104	        total_cost = (quantity * price) + fee
+   105	        if self.cash < total_cost:
+   106	            return {
+   107	                "status": "REJECTED",
+   108	                "reason": "Insufficient cash to cover cost and fees"
+   109	            }
+   110	
+   111	        self.cash -= total_cost
+   112	        if symbol not in self.positions:
+   113	            self.positions[symbol] = {"quantity": quantity, "avg_price": price}
+   114	        else:
+   115	            current_pos = self.positions[symbol]
+   116	            old_qty = current_pos["quantity"]
+   117	            old_avg = current_pos["avg_price"]
+   118	            new_qty = old_qty + quantity
+   119	            new_avg = ((old_qty * old_avg) + (quantity * price)) / new_qty if new_qty > 0 else price
+   120	            self.positions[symbol] = {"quantity": new_qty, "avg_price": new_avg}
+   121	
+   122	        self.trade_count += 1
+   123	        return {
+   124	            "status": "FILLED",
+   125	            "action": "BUY",
+   126	            "symbol": symbol,
+   127	            "quantity": quantity,
+   128	            "price": price,
+   129	            "fee": fee,
+   130	            "total_cost": total_cost,
+   131	            "cost": total_cost,
+   132	            "cash": self.cash
+   133	        }
+   134	
+   135	    def record_sell(self, symbol: str, quantity: float, price: float, fee: float = 0.0) -> Dict[str, Any]:
+   136	        current_qty = self.get_position(symbol)
+   137	        if current_qty < quantity or quantity <= 0:
+   138	            return {
+   139	                "status": "REJECTED",
+   140	                "reason": "Insufficient position quantity to sell"
+   141	            }
+   142	
+   143	        pos = self.positions[symbol]
+   144	        avg_price = pos["avg_price"]
+   145	        pnl = (price - avg_price) * quantity - fee
+   146	
+   147	        proceeds = (quantity * price) - fee
+   148	        self.cash += proceeds
+   149	        self.realized_pnl += pnl
+   150	
+   151	        remaining_qty = current_qty - quantity
+   152	        if remaining_qty <= 1e-8:
+   153	            self.positions.pop(symbol, None)
+   154	        else:
+   155	            self.positions[symbol]["quantity"] = remaining_qty
+   156	
+   157	        self.trade_count += 1
+   158	        return {
+   159	            "status": "FILLED",
+   160	            "action": "SELL",
+   161	            "symbol": symbol,
+   162	            "quantity": quantity,
+   163	            "price": price,
+   164	            "fee": fee,
+   165	            "realized_pnl": pnl,
+   166	            "cash": self.cash
+   167	        }

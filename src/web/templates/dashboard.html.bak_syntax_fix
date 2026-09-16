@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#030712">
+    <meta name="description" content="AtriaTrade Pro Paper Trading Dashboard">
+    <title>AtriaTrade Pro Auto-Pilot</title>
+
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23030712'/%3E%3Cpath d='M32 10 52 50H42l-4-9H26l-4 9H12L32 10Zm0 16-4 8h8l-4-8Z' fill='%2310b981'/%3E%3C/svg%3E">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        :root {
+            color-scheme: dark;
+        }
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background:
+                radial-gradient(circle at 10% 0%, rgba(6, 78, 59, 0.22), transparent 30rem),
+                radial-gradient(circle at 100% 20%, rgba(30, 64, 175, 0.18), transparent 28rem),
+                #030712;
+        }
+        button {
+            -webkit-tap-highlight-color: transparent;
+        }
+        .glass-panel {
+            background: linear-gradient(
+                145deg,
+                rgba(17, 24, 39, 0.92),
+                rgba(8, 15, 30, 0.88)
+            );
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(148, 163, 184, 0.14);
+            box-shadow:
+                0 12px 35px rgba(0, 0, 0, 0.25),
+                inset 0 1px 0 rgba(255, 255, 255, 0.03);
+        }
+        .metric-value {
+            direction: ltr;
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+        .status-dot {
+            box-shadow: 0 0 12px currentColor;
+        }
+        .chart-shell {
+            position: relative;
+            height: 12rem;
+            width: 100%;
+        }
+        .disabled-action {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+        .flash-success {
+            animation: flashSuccess 0.7s ease-out;
+        }
+        .flash-error {
+            animation: flashError 0.7s ease-out;
+        }
+        @keyframes flashSuccess {
+            0% { box-shadow: 0 0 0 rgba(16, 185, 129, 0); }
+            50% { box-shadow: 0 0 24px rgba(16, 185, 129, 0.6); }
+            100% { box-shadow: 0 0 0 rgba(16, 185, 129, 0); }
+        }
+        @keyframes flashError {
+            0% { box-shadow: 0 0 0 rgba(244, 63, 94, 0); }
+            50% { box-shadow: 0 0 24px rgba(244, 63, 94, 0.6); }
+            100% { box-shadow: 0 0 0 rgba(244, 63, 94, 0); }
+        }
+    </style>
+</head>
+
+<body class="min-h-screen p-3 sm:p-5 text-gray-100">
+    <main class="mx-auto flex w-full max-w-6xl flex-col gap-4">
+
+        <!-- Header -->
+        <header class="glass-panel flex flex-col gap-3 rounded-2xl p-3 sm:flex-row sm:items-center sm:justify-between">
+            <div class="flex items-center gap-3">
+                <span id="system-dot" class="status-dot inline-block h-3.5 w-3.5 rounded-full bg-emerald-500 text-emerald-500 animate-pulse"></span>
+                <div>
+                    <h1 class="text-sm font-black tracking-wide sm:text-base">
+                        ATRIATRADE AUTO-PILOT
+                    </h1>
+                    <div class="mt-0.5 flex items-center gap-2 text-[10px] text-gray-400">
+                        <span id="connection-status">در حال برقراری اتصال...</span>
+                        <span>•</span>
+                        <span class="text-amber-400 font-bold">PAPER TRADING</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-2">
+                <button
+                    id="auto-btn"
+                    type="button"
+                    onclick="triggerAction('toggle_auto')"
+                    class="rounded-xl bg-emerald-600 px-3.5 py-1.5 text-xs font-bold text-white transition hover:bg-emerald-500 active:scale-95"
+                >
+                    اتوپایلوت: فعال
+                </button>
+
+                <button
+                    id="panic-btn"
+                    type="button"
+                    onclick="triggerAction('panic')"
+                    class="rounded-xl bg-rose-600 px-3.5 py-1.5 text-xs font-bold text-white transition hover:bg-rose-500 active:scale-95"
+                >
+                    🚨 PANIC
+                </button>
+            </div>
+        </header>
+
+        <!-- Metrics -->
+        <section class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div class="glass-panel rounded-2xl border-cyan-500/30 p-3.5">
+                <div class="text-[11px] font-medium text-gray-400">قیمت BTC/USDT</div>
+                <div id="btc-price" class="metric-value mt-1 text-base font-black text-cyan-400 sm:text-lg">$0.00</div>
+            </div>
+
+            <div class="glass-panel rounded-2xl border-blue-500/30 p-3.5">
+                <div class="text-[11px] font-medium text-gray-400">کل سرمایه (Equity)</div>
+                <div id="total-equity" class="metric-value mt-1 text-base font-black text-blue-400 sm:text-lg">$0.00</div>
+            </div>
+
+            <div class="glass-panel rounded-2xl border-amber-500/30 p-3.5">
+                <div class="text-[11px] font-medium text-gray-400">صندوق امن سود</div>
+                <div id="reserve-vault" class="metric-value mt-1 text-base font-black text-amber-400 sm:text-lg">$0.00</div>
+            </div>
+
+            <div class="glass-panel rounded-2xl border-purple-500/30 p-3.5">
+                <div class="text-[11px] font-medium text-gray-400">نرخ برد / سود کل</div>
+                <div id="win-rate-stat" class="metric-value mt-1 text-base font-black text-purple-400 sm:text-lg">0% (+$0.00)</div>
+            </div>
+        </section>
+
+        <!-- Chart Section -->
+        <section class="glass-panel rounded-2xl p-3.5">
+            <div class="mb-2 flex items-center justify-between">
+                <div class="text-xs font-bold text-gray-300">📈 نوسانات زنده قیمت BTC</div>
+                <div class="flex items-center gap-2">
+                    <span id="chart-range" class="font-mono text-[10px] text-gray-400">در انتظار داده</span>
+                    <span class="rounded-full border border-emerald-800 bg-emerald-950 px-2 py-0.5 text-[10px] font-bold text-emerald-400">
+                        LIVE
+                    </span>
+                </div>
+            </div>
+
+            <div class="chart-shell">
+                <canvas id="priceChart"></canvas>
+            </div>
+        </section>
+
+        <!-- Indicators & Position -->
+        <section class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div class="glass-panel flex flex-col justify-between rounded-2xl p-3.5">
+                <div class="text-xs font-bold text-gray-400">تحلیل تکنیکال</div>
+                <div class="mt-2 flex items-center justify-between">
+                    <span class="text-xs text-gray-300">شاخص RSI (14):</span>
+                    <span id="rsi-val" class="text-sm font-bold text-amber-400">--</span>
+                </div>
+                <div class="mt-1 flex items-center justify-between">
+                    <span class="text-xs text-gray-300">روند استراتژی:</span>
+                    <span id="trend-val" class="text-xs font-bold text-emerald-400">--</span>
+                </div>
+            </div>
+
+            <div class="glass-panel flex flex-col justify-between rounded-2xl border-indigo-500/30 p-3.5">
+                <div class="text-xs font-bold text-gray-400">پوزیشن فعال ربات</div>
+                <div id="active-position" class="mt-2 text-xs font-semibold text-gray-200">
+                    بدون معامله باز
+                </div>
+                <div id="pos-pnl" class="mt-1 text-xs font-bold text-gray-500">
+                    PnL: $0.00
+                </div>
+            </div>
+        </section>
+
+        <!-- Manual Actions -->
+        <section class="grid grid-cols-2 gap-3">
+            <button
+                id="buy-btn"
+                type="button"
+                onclick="triggerAction('buy')"
+                class="w-full rounded-xl bg-emerald-600/90 py-2.5 text-xs font-bold text-white shadow-lg transition hover:bg-emerald-500 active:scale-[0.98]"
+            >
+                ↑ خرید دستی 0.02 BTC
+            </button>
+
+            <button
+                id="sell-btn"
+                type="button"
+                onclick="triggerAction('sell')"
+                class="w-full rounded-xl bg-rose-600/90 py-2.5 text-xs font-bold text-white shadow-lg transition hover:bg-rose-500 active:scale-[0.98]"
+            >
+                ↓ فروش دستی 0.02 BTC
+            </button>
+        </section>
+
+        <!-- Trades & Logs -->
+        <section class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div class="glass-panel rounded-2xl p-3">
+                <div class="mb-2 text-xs font-bold text-gray-400">📜 تاریخچه معاملات بسته‌شده</div>
+                <div id="trades-container" class="max-h-40 space-y-1.5 overflow-y-auto text-[11px] text-gray-300">
+                    <p class="text-gray-500">هنوز معامله‌ای ثبت نشده است.</p>
+                </div>
+            </div>
+
+            <div class="glass-panel rounded-2xl p-3">
+                <div class="mb-2 text-xs font-bold text-gray-400">⚡️ رویدادهای زنده سیستم</div>
+                <div id="logs-container" class="max-h-40 space-y-1 overflow-y-auto font-mono text-[10px] text-emerald-400/90">
+                    <p>در انتظار لاگ...</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Footer -->
+        <footer class="flex items-center justify-between px-1 text-[10px] text-gray-500">
+            <span>AtriaTrade Pro • Paper Engine</span>
+            <span id="last-update">آخرین بروزرسانی: --</span>
+        </footer>
+    </main>
+
+    <script>
+        "use strict";
+
+        const CHART_POINTS = 40;
+        const POLL_INTERVAL_MS = 1800;
+
+        let isRequestInProgress = false;
+        let hasReceivedFirstTelemetry = false;
+        let latestPrice = null;
+
+        const byId = (id) => document.getElementById(id);
+
+        const ctx = byId("priceChart").getContext("2d");
+
+        const priceChart = new Chart(ctx, {
+            type: "line",
+            data: {
+                labels: Array(CHART_POINTS).fill(""),
+                datasets: [{
+                    label: "BTC/USDT",
+                    data: Array(CHART_POINTS).fill(null),
+                    borderColor: "#10b981",
+                    borderWidth: 2,
+                    tension: 0.35,
+                    pointRadius: 1,
+                    pointHoverRadius: 3,
+                    fill: true,
+                    spanGaps: true,
+                    backgroundColor: "rgba(16, 185, 129, 0.08)"
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: false,
+                interaction: {
+                    intersect: false,
+                    mode: "index"
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        displayColors: false,
+                        callbacks: {
+                            label: (context) => {
+                                const value = Number(context.parsed.y);
+                                return Number.isFinite(value)
+                                    ? "$" + formatNumber(value, 2)
+                                    : "";
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        display: false
+                    },
+                    y: {
+                        grace: 0,
+                        grid: {
+                            color: "rgba(255, 255, 255, 0.05)"
+                        },
+                        ticks: {
+                            color: "#6b7280",
+                            font: {
+                                size: 9
+                            },
+                            callback: (value) => "$" + formatCompactNumber(value)
+                        }
+                    }
+                }
+            }
+        });
+
+        function formatNumber(value, decimals = 2) {
+            const number = Number(value);
+            if (!Number.isFinite(number)) {
+                return "0.00";
+            }
+            return number.toLocaleString("en-US", {
+                minimumFractionDigits: decimals,
+                maximumFractionDigits: decimals
+            });
+        }
+
+        function formatCompactNumber(value) {
+            const number = Number(value);
+            if (!Number.isFinite(number)) {
+                return "0";
+            }
+            if (number >= 1000000) {
+                return (number / 1000000).toFixed(1) + "M";
+            }
+            if (number >= 1000) {
+                return (number / 1000).toFixed(1) + "K";
+            }
+            return number.toFixed(0);
+        }
+
+        function parseNumeric(value, fallback = null) {
+            if (typeof value === "number") {
+                return Number.isFinite(value) ? value : fallback;
+            }
+            if (typeof value !== "string") {
+                return fallback;
+            }
+            const normalized = value
+                .replace(/,/g, "")
+                .replace(/\$/g, "")
+                .replace(/٪/g, "")
+                .trim();
+            const parsed = Number(normalized);
+            return Number.isFinite(parsed) ? parsed : fallback;
+        }
+
+        function formatMoney(value, decimals = 2) {
+            const parsed = parseNumeric(value, 0);
+            return "$" + formatNumber(parsed, decimals);
+        }
+
+        function setConnectionState(connected, message) {
+            const status = byId("connection-status");
+            const dot = byId("system-dot");
+            status.textContent = message;
+            if (connected) {
+                status.className = "text-emerald-400";
+                dot.className = "status-dot inline-block h-3.5 w-3.5 rounded-full bg-emerald-500 text-emerald-500 animate-pulse";
+            } else {
+                status.className = "text-rose-400";
+                dot.className = "status-dot inline-block h-3.5 w-3.5 rounded-full bg-rose-500 text-rose-500";
+            }
+        }
+
+        function setButtonBusy(isBusy) {
+            isRequestInProgress = isBusy;
+            const buttons = [
+                byId("auto-btn"),
+                byId("panic-btn"),
+                byId("buy-btn"),
+                byId("sell-btn")
+            ];
+            buttons.forEach((button) => {
+                if (!button) return;
+                button.disabled = isBusy;
+                if (isBusy) {
+                    button.classList.add("disabled-action");
+                } else {
+                    button.classList.remove("disabled-action");
+                }
+            });
+        }
+
+        function flashElement(element, type) {
+            if (!element) return;
+            element.classList.remove("flash-success", "flash-error");
+            void element.offsetWidth;
+            element.classList.add(type === "error" ? "flash-error" : "flash-success");
+        }
+
+        function updateAutoButton(data) {
+            const button = byId("auto-btn");
+            const rawState =
+                data.auto_enabled ??
+                data.autopilot_enabled ??
+                data.auto_mode ??
+                data.is_auto;
+
+            if (typeof rawState !== "boolean") return;
+
+            if (rawState) {
+                button.textContent = "اتوپایلوت: فعال";
+                button.className = "rounded-xl bg-emerald-600 px-3.5 py-1.5 text-xs font-bold text-white transition hover:bg-emerald-500 active:scale-95";
+            } else {
+                button.textContent = "اتوپایلوت: خاموش";
+                button.className = "rounded-xl bg-gray-700 px-3.5 py-1.5 text-xs font-bold text-gray-200 transition hover:bg-gray-600 active:scale-95";
+            }
+        }
+
+        function updatePosition(position) {
+            const pos = position && typeof position === "object" ? position : { side: "FLAT" };
+            const side = String(pos.side ?? "FLAT").toUpperCase();
+
+            if (side !== "FLAT") {
+                const amount = pos.amount ?? "--";
+                const entryPrice = pos.entry_price ?? "--";
+                const pnlValue = parseNumeric(pos.pnl, 0);
+                const takeProfit = pos.tp ?? "--";
+                const stopLoss = pos.sl ?? "--";
+
+                byId("active-position").textContent = `${side} (${amount} BTC @ ${entryPrice})`;
+                const pnlElement = byId("pos-pnl");
+                pnlElement.textContent = `PnL: ${pnlValue >= 0 ? "+" : ""}${formatNumber(pnlValue, 2)} USDT [TP: ${takeProfit} | SL: ${stopLoss}]`;
+                pnlElement.className = `mt-1 text-xs font-bold ${pnlValue >= 0 ? "text-emerald-400" : "text-rose-400"}`;
+            } else {
+                byId("active-position").textContent = "بدون معامله باز (در حال تحلیل)";
+                byId("pos-pnl").textContent = "PnL: $0.00";
+                byId("pos-pnl").className = "mt-1 text-xs font-bold text-gray-500";
+            }
+        }
+
+        function updateChart(price) {
+            const currentPrice = parseNumeric(price, null);
+            if (!Number.isFinite(currentPrice) || currentPrice <= 0) {
+                return;
+            }
+
+            latestPrice = currentPrice;
+            const dataset = priceChart.data.datasets[0].data;
+
+            if (!hasReceivedFirstTelemetry) {
+                dataset.fill(currentPrice);
+                hasReceivedFirstTelemetry = true;
+            } else {
+                dataset.push(currentPrice);
+                while (dataset.length > CHART_POINTS) {
+                    dataset.shift();
+                }
+            }
+
+            const validPrices = dataset
+                .map(Number)
+                .filter((value) => Number.isFinite(value) && value > 0);
+
+            if (validPrices.length === 0) return;
+
+            const minimum = Math.min(...validPrices);
+            const maximum = Math.max(...validPrices);
+            const spread = Math.max(maximum - minimum, currentPrice * 0.0025);
+            const padding = spread * 0.18;
+
+            let axisMinimum = Math.max(0, minimum - padding);
+            let axisMaximum = maximum + padding;
+
+            const minimumAxisRange = currentPrice * 0.004;
+            if ((axisMaximum - axisMinimum) < minimumAxisRange) {
+                const center = currentPrice;
+                axisMinimum = Math.max(0, center - minimumAxisRange / 2);
+                axisMaximum = center + minimumAxisRange / 2;
+            }
+
+            if (priceChart.options.scales && priceChart.options.scales.y) {
+                priceChart.options.scales.y.min = axisMinimum;
+                priceChart.options.scales.y.max = axisMaximum;
+            }
+
+            byId("chart-range").textContent = `${formatCompactNumber(axisMinimum)} - ${formatCompactNumber(axisMaximum)}`;
+            priceChart.update("none");
+        }
+
+        function updateTrades(trades) {
+            const container = byId("trades-container");
+            const safeTrades = Array.isArray(trades) ? trades : [];
+
+            if (safeTrades.length === 0) {
+                container.innerHTML = '<p class="text-gray-500">هنوز معامله‌ای ثبت نشده است.</p>';
+                return;
+            }
+
+            container.replaceChildren();
+            safeTrades.slice(-20).reverse().forEach((trade) => {
+                const row = document.createElement("div");
+                row.className = "flex justify-between border-b border-gray-800 pb-1";
+
+                const left = document.createElement("span");
+                left.textContent = `[${trade?.time ?? "--"}] ${trade?.action ?? "--"}`;
+
+                const right = document.createElement("span");
+                const pnlText = String(trade?.pnl ?? "");
+                right.textContent = pnlText;
+                right.className = `${pnlText.includes("+") ? "text-emerald-400" : "text-rose-400"} font-bold`;
+
+                row.append(left, right);
+                container.appendChild(row);
+            });
+        }
+
+        function updateLogs(logs) {
+            const container = byId("logs-container");
+            const safeLogs = Array.isArray(logs) ? logs : [];
+
+            if (safeLogs.length === 0) {
+                container.innerHTML = "<p>در انتظار لاگ...</p>";
+                return;
+            }
+
+            container.replaceChildren();
+            safeLogs.slice(-15).reverse().forEach((log) => {
+                const line = document.createElement("div");
+                line.textContent = String(log);
+                container.appendChild(line);
+            });
+        }
+
+        function updateDashboard(data) {
+            const payload = data && typeof data === "object" ? data : {};
+
+            const price = parseNumeric(payload.btc_price, null);
+            const equity = parseNumeric(payload.total_equity, 0);
+            const reserve = parseNumeric(payload.reserve_usdt, 0);
+            const winRate = payload.win_rate ?? "0%";
+            const totalProfit = payload.total_profit_usdt ?? "$0.00";
+
+            byId("btc-price").textContent = price !== null ? formatMoney(price, 2) : "$--";
+            byId("total-equity").textContent = formatMoney(equity, 2);
+            byId("reserve-vault").textContent = formatMoney(reserve, 2);
+            byId("win-rate-stat").textContent = `${winRate} (${totalProfit})`;
+
+            byId("rsi-val").textContent = payload.rsi ?? "--";
+            byId("trend-val").textContent = payload.trend ?? "--";
+
+            updatePosition(payload.position);
+            updateChart(payload.btc_price);
+            updateTrades(payload.recent_trades);
+            updateLogs(payload.logs);
+            updateAutoButton(payload);
+
+            byId("last-update").textContent = "آخرین بروزرسانی: " + new Date().toLocaleTimeString("fa-IR");
+        }
+
+        async function fetchTelemetry() {
+            try {
+                const response = await fetch("/api/telemetry", {
+                    method: "GET",
+                    cache: "no-store",
+                    headers: { "Accept": "application/json" }
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Telemetry HTTP ${response.status}`);
+                }
+
+                const data = await response.json();
+                updateDashboard(data);
+                setConnectionState(true, "اتصال API برقرار است");
+            } catch (error) {
+                console.error("Telemetry fetch error:", error);
+                setConnectionState(false, "اتصال API برقرار نیست");
+            }
+        }
+
+        async function triggerAction(action) {
+            if (isRequestInProgress) return;
+            setButtonBusy(true);
+
+            try {
+                const response = await fetch("/api/action", {
+                    method: "POST",
+                    cache: "no-store",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Accept": "application/json"
+                    },
+                    body: JSON.stringify({
+                        action: action,
+                        amount: 0.02
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Action HTTP ${response.status}`);
+                }
+
+                const sourceButton =
+                    action === "buy" ? byId("buy-btn") :
+                    action === "sell" ? byId("sell-btn") :
+                    action === "panic" ? byId("panic-btn") :
+                    byId("auto-btn");
+
+                flashElement(sourceButton, "success");
+                await fetchTelemetry();
+            } catch (error) {
+                console.error("گ سینتکسی جاوااسکریپت یا HTML وجود ندارد، این دستور را در ترموکس بزن:
+
+-btn") :
+                    action === "sell" ? byId("sell-btn") :
+                    action === "panic" ? byId("panic-btn") :
+                    byId("auto-btn");
+
+                flashElement(sourceButton, "error");
+                setConnectionState(false, "خطا در اجرای فرمان");
+            } finally {
+                setButtonBusy(false);
+            }
+        }
+
+        setInterval(fetchTelemetry, POLL_INTERVAL_MS);
+        fetchTelemetry();
+    </script>
+</body>
+</html>

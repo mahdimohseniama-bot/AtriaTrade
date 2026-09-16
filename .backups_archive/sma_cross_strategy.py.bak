@@ -1,0 +1,142 @@
+from typing import Any, Dict, List, Optional str = "class SMACrossStrategy:
+    def __init__(
+        self,
+        symbol: str = "BTCUSDT",
+        fast_period: Optional[int] = None,
+        slow_period: Optional[int] = None,
+        short_window: int = 5,
+        long_window: int = 20,
+        engine: Any = None,
+        quantity: float = 1.0,
+        take_profit_pct: float = 0.05,
+        stop_loss_pct: float = 0.02,
+        **kwargs,
+    ):
+        self.symbol = symbol
+        self.fast_period = int(
+            fast_period if fast_period is not None else short_window
+        )
+        self.slow_period = int(
+            slow_period if slow_period is not None else long_window
+        )
+        self.short_window = self.fast_period
+        self.long_window = self.slow_period
+        self.engine = engine
+        self.quantity = float(quantity)
+        self.take_profit_pct = float(take_profit_pct)
+        self.stop_loss_pct = float(stop_loss_pct)
+        self.prices: List[float] = []
+
+    def _signal_from_series(self, values: List[float]) -> str:
+        if len(values) < self.slow_period:
+            return "HOLD"
+
+        fast_now = sum(values[-self.fast_period:]) / self.fast_period
+        slow_now = sum(values[-self.slow_period:]) / self.slow_period
+
+        if len(values) < self.slow_period + 1:
+            return "BUY" if fast_now > slow_now else "HOLD"
+
+        fast_previous = (
+            sum(values[-self.fast_period - 1:-1])
+            / self.fast_period
+        )
+        slow_previous = (
+            sum(values[-self.slow_period - 1:-1])
+            / self.slow_period
+        )
+
+        if fast_previous <= slow_previous and fast_now > slow_now:
+            return "BUY"
+
+        if fast_previous >= slow_previous and fast_now < slow_now:
+            return "SELL"
+
+        return "HOLD"
+
+    def generate_signal(
+        self,
+        price: Union[float, List[float], tuple],
+    ) -> str:
+        if isinstance(price, (list, tuple)):
+            if not price:
+                return "HOLD"
+
+            try:
+                values = [float(item) for item in price]
+            except (TypeError, ValueError):
+                return "HOLD"
+
+            if any(item <= 0 for item in values):
+                return "HOLD"
+
+            self.prices = values.copy()
+            return self._signal_from_series(values)
+
+        try:
+            current_price = float(price)
+        except (TypeError, ValueError):
+            return "HOLD"
+
+        if current_price <= 0:
+            return "HOLD"
+
+        self.prices.append(current_price)
+        return self._signal_from_series(self.prices)
+
+    def _dispatch_signal(
+        self,
+        signal: str,
+        symbol: str,
+        price: float,
+    ) -> None:
+        if self.engine is None:
+            return
+
+        payload = {
+            "action": signal,
+            "signal": signal,
+            "symbol": symbol,
+            "price": price,
+            "quantity": self.quantity,
+        }
+
+        received = getattr(self.engine, "received_signals", None)
+        if isinstance(received, list):
+            received.append(payload)
+
+        portfolio = getattr(self.engine, "portfolio", None)
+        if isinstance(portfolio, dict):
+            current = float(portfolio.get(symbol, 0.0))
+
+            if signal == "BUY":
+                portfolio[symbol] = current + self.quantity
+            elif signal == "SELL":
+                portfolio[symbol] = max(0.0, current - self.quantity)
+
+        dispatch = getattr(self.engine, "on_signal", None)
+        if callable(dispatch):
+            dispatch(payload)
+
+    def on_tick(self, tick: Dict[str, Any]) -> Optional[str]:
+        if not isinstance(tick, dict):
+            return None
+
+        raw_price = tick.get("price")
+
+        try:
+            price = float(raw_price)
+        except (TypeError, ValueError):
+            return None
+
+        if price <= 0:
+            return None
+
+        symbol = str(tick.get("symbol", self.symbol))
+        signal = self.generate_signal(price)
+
+        if signal in {"BUY", "SELL"}:
+            self._dispatch_signal(signal, symbol, price)
+            return signal
+
+        return None

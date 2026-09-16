@@ -1,0 +1,14 @@
+Python: 3.13.13 (main, Apr 10 2026, 13:09:22) [Clang 21.0.0 (https://android.googlesource.com/toolchain/llvm-project 5e96669f0
+Root: /data/data/com.termux/files/home/AtriaTrade
+[OK] src.web.app
+     module: /data/data/com.termux/files/home/AtriaTrade/src/web/app.py
+     app: <fastapi.applications.FastAPI object at 0x6d604e6e40>
+[OK] src.web.main
+     module: /data/data/com.termux/files/home/AtriaTrade/src/web/main.py
+     app: <fastapi.applications.FastAPI object at 0x6d605b0b90>
+[OK] src.web.server
+     module: /data/data/com.termux/files/home/AtriaTrade/src/web/server.py
+     app: <fastapi.applications.FastAPI object at 0x6d605b1a90>
+[OK] src.dashboard.server
+     module: /data/data/com.termux/files/home/AtriaTrade/src/dashboard/server.py
+     app: None

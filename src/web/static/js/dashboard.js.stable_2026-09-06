@@ -1,0 +1,387 @@
+const POLL_INTERVAL_MS = 2500;
+const CHART_POINTS = 20;
+
+let hasReceivedFirstTelemetry = false;
+let isRequestInProgress = false;
+let latestPrice = null;
+
+function byId(id) {
+    return document.getElementById(id);
+}
+
+const canvasElement = byId("priceChart");
+const chartContext = canvasElement.getContext("2d");
+
+const chartGradient = chartContext.createLinearGradient(0, 0, 0, 200);
+chartGradient.addColorStop(0, "rgba(16, 185, 129, 0.35)");
+chartGradient.addColorStop(1, "rgba(16, 185, 129, 0.0)");
+
+const priceChart = new Chart(chartContext, {
+    type: "line",
+    data: {
+        labels: Array.from({ length: CHART_POINTS }, (_, i) => i + 1),
+        datasets: [{
+            label: "BTC/USDT",
+            data: Array(CHART_POINTS).fill(null),
+            borderColor: "#10b981",
+            borderWidth: 2,
+            backgroundColor: chartGradient,
+            fill: true,
+            tension: 0.35,
+            pointRadius: 0,
+            pointHoverRadius: 4
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        plugins: {
+            legend: { display: false },
+            tooltip: {
+                enabled: true,
+                callbacks: {
+                    label: (context) => "$" + formatNumber(context.parsed.y, 2)
+                }
+            }
+        },
+        scales: {
+            x: { display: false },
+            y: {
+                position: "right",
+                grace: 0,
+                grid: {
+                    color: "rgba(255, 255, 255, 0.05)"
+                },
+                ticks: {
+                    color: "#6b7280",
+                    font: { size: 9 },
+                    callback: (value) => "$" + formatCompactNumber(value)
+                }
+            }
+        }
+    }
+});
+
+function formatNumber(value, decimals = 2) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return "0.00";
+    return number.toLocaleString("en-US", {
+        minimumFractionDigits: decimals,
+        maximumFractionDigits: decimals
+    });
+}
+
+function formatCompactNumber(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return "0";
+    if (number >= 1000000) return (number / 1000000).toFixed(1) + "M";
+    if (number >= 1000) return (number / 1000).toFixed(1) + "K";
+    return number.toFixed(0);
+}
+
+function parseNumeric(value, fallback = null) {
+    if (typeof value === "number") {
+        return Number.isFinite(value) ? value : fallback;
+    }
+    if (typeof value !== "string") {
+        return fallback;
+    }
+    const normalized = value.replace(/,/g, "").replace(/\$/g, "").replace(/٪/g, "").trim();
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function formatMoney(value, decimals = 2) {
+    const parsed = parseNumeric(value, 0);
+    return "$" + formatNumber(parsed, decimals);
+}
+
+function setConnectionState(connected, message) {
+    const status = byId("connection-status");
+    const dot = byId("system-dot");
+    if (!status || !dot) return;
+    status.textContent = message;
+    if (connected) {
+        status.className = "text-emerald-400";
+        dot.className = "status-dot inline-block h-3.5 w-3.5 rounded-full bg-emerald-500 text-emerald-500 animate-pulse";
+    } else {
+        status.className = "text-rose-400";
+        dot.className = "status-dot inline-block h-3.5 w-3.5 rounded-full bg-rose-500 text-rose-500";
+    }
+}
+
+function setButtonBusy(isBusy) {
+    isRequestInProgress = isBusy;
+    const buttons = [
+        byId("auto-btn"),
+        byId("panic-btn"),
+        byId("buy-btn"),
+        byId("sell-btn")
+    ];
+    buttons.forEach((button) => {
+        if (!button) return;
+        button.disabled = isBusy;
+        if (isBusy) {
+            button.classList.add("disabled-action");
+        } else {
+            button.classList.remove("disabled-action");
+        }
+    });
+}
+
+function flashElement(element, type) {
+    if (!element) return;
+    element.classList.remove("flash-success", "flash-error");
+    void element.offsetWidth;
+    element.classList.add(type === "error" ? "flash-error" : "flash-success");
+}
+
+function updateAutoButton(data) {
+    const button = byId("auto-btn");
+    if (!button) return;
+    const rawState =
+        data.auto_enabled ??
+        data.autopilot_enabled ??
+        data.auto_mode ??
+        data.is_auto;
+
+    if (typeof rawState !== "boolean") return;
+
+    if (rawState) {
+        button.textContent = "اتوپایلوت: فعال";
+        button.className = "rounded-xl bg-emerald-600 px-3.5 py-1.5 text-xs font-bold text-white transition hover:bg-emerald-500 active:scale-95";
+    } else {
+        button.textContent = "اتوپایلوت: خاموش";
+        button.className = "rounded-xl bg-gray-700 px-3.5 py-1.5 text-xs font-bold text-gray-200 transition hover:bg-gray-600 active:scale-95";
+    }
+}
+
+function updatePosition(position) {
+    const pos = position && typeof position === "object" ? position : { side: "FLAT" };
+    const side = String(pos.side ?? "FLAT").toUpperCase();
+    const activePosEl = byId("active-position");
+    const posPnlEl = byId("pos-pnl");
+    if (!activePosEl || !posPnlEl) return;
+
+    if (side !== "FLAT") {
+        const amount = pos.amount ?? "--";
+        const entryPrice = pos.entry_price ?? "--";
+        const pnlValue = parseNumeric(pos.pnl, 0);
+        const takeProfit = pos.tp ?? "--";
+        const stopLoss = pos.sl ?? "--";
+
+        activePosEl.textContent = `${side} (${amount} BTC @ ${entryPrice})`;
+        posPnlEl.textContent = `PnL: ${pnlValue >= 0 ? "+" : ""}${formatNumber(pnlValue, 2)} USDT [TP: ${takeProfit} | SL: ${stopLoss}]`;
+        posPnlEl.className = `mt-1 text-xs font-bold ${pnlValue >= 0 ? "text-emerald-400" : "text-rose-400"}`;
+    } else {
+        activePosEl.textContent = "بدون معامله باز (در حال تحلیل)";
+        posPnlEl.textContent = "PnL: $0.00";
+        posPnlEl.className = "mt-1 text-xs font-bold text-gray-500";
+    }
+}
+
+function updateChart(price) {
+    const currentPrice = parseNumeric(price, null);
+    if (!Number.isFinite(currentPrice) || currentPrice <= 0) return;
+
+    latestPrice = currentPrice;
+    const dataset = priceChart.data.datasets[0].data;
+
+    if (!hasReceivedFirstTelemetry) {
+        dataset.fill(currentPrice);
+        hasReceivedFirstTelemetry = true;
+    } else {
+        dataset.push(currentPrice);
+        while (dataset.length > CHART_POINTS) {
+            dataset.shift();
+        }
+    }
+
+    const validPrices = dataset
+        .map(Number)
+        .filter((value) => Number.isFinite(value) && value > 0);
+
+    if (validPrices.length === 0) return;
+
+    const minimum = Math.min(...validPrices);
+    const maximum = Math.max(...validPrices);
+    const spread = Math.max(maximum - minimum, currentPrice * 0.0025);
+    const padding = spread * 0.18;
+
+    let axisMinimum = Math.max(0, minimum - padding);
+    let axisMaximum = maximum + padding;
+
+    const minimumAxisRange = currentPrice * 0.004;
+    if ((axisMaximum - axisMinimum) < minimumAxisRange) {
+        const center = currentPrice;
+        axisMinimum = Math.max(0, center - minimumAxisRange / 2);
+        axisMaximum = center + minimumAxisRange / 2;
+    }
+
+    if (priceChart.options.scales && priceChart.options.scales.y) {
+        priceChart.options.scales.y.min = axisMinimum;
+        priceChart.options.scales.y.max = axisMaximum;
+    }
+
+    const rangeEl = byId("chart-range");
+    if (rangeEl) {
+        rangeEl.textContent = `${formatCompactNumber(axisMinimum)} - ${formatCompactNumber(axisMaximum)}`;
+    }
+    priceChart.update("none");
+}
+
+function updateTrades(trades) {
+    const container = byId("trades-container");
+    if (!container) return;
+    const safeTrades = Array.isArray(trades) ? trades : [];
+
+    if (safeTrades.length === 0) {
+        container.innerHTML = '<p class="text-gray-500">هنوز معامله‌ای ثبت نشده است.</p>';
+        return;
+    }
+
+    container.replaceChildren();
+    safeTrades.slice(-20).reverse().forEach((trade) => {
+        const row = document.createElement("div");
+        row.className = "flex justify-between border-b border-gray-800 pb-1";
+
+        const left = document.createElement("span");
+        left.textContent = `[${trade?.time ?? "--"}] ${trade?.action ?? "--"}`;
+
+        const right = document.createElement("span");
+        const pnlText = String(trade?.pnl ?? "");
+        right.textContent = pnlText;
+        right.className = `${pnlText.includes("+") ? "text-emerald-400" : "text-rose-400"} font-bold`;
+
+        row.append(left, right);
+        container.appendChild(row);
+    });
+}
+
+function updateLogs(logs) {
+    const container = byId("logs-container");
+    if (!container) return;
+    const safeLogs = Array.isArray(logs) ? logs : [];
+
+    if (safeLogs.length === 0) {
+        container.innerHTML = "<p>در انتظار لاگ...</p>";
+        return;
+    }
+
+    container.replaceChildren();
+    safeLogs.slice(-15).reverse().forEach((log) => {
+        const line = document.createElement("div");
+        line.textContent = String(log);
+        container.appendChild(line);
+    });
+}
+
+function updateDashboard(data) {
+    const payload = data && typeof data === "object" ? data : {};
+
+    const price = parseNumeric(payload.btc_price, null);
+    const equity = parseNumeric(payload.total_equity, 0);
+    const reserve = parseNumeric(payload.reserve_usdt, 0);
+    const winRate = payload.win_rate ?? "0%";
+    const totalProfit = payload.total_profit_usdt ?? "$0.00";
+
+    const btcPriceEl = byId("btc-price");
+    if (btcPriceEl) btcPriceEl.textContent = price !== null ? formatMoney(price, 2) : "$--";
+
+    const equityEl = byId("total-equity");
+    if (equityEl) equityEl.textContent = formatMoney(equity, 2);
+
+    const vaultEl = byId("reserve-vault");
+    if (vaultEl) vaultEl.textContent = formatMoney(reserve, 2);
+
+    const winRateEl = byId("win-rate-stat");
+    if (winRateEl) winRateEl.textContent = `${winRate} (${totalProfit})`;
+
+    const rsiEl = byId("rsi-val");
+    if (rsiEl) rsiEl.textContent = payload.rsi ?? "--";
+
+    const trendEl = byId("trend-val");
+    if (trendEl) trendEl.textContent = payload.trend ?? "--";
+
+    updatePosition(payload.position);
+    updateChart(payload.btc_price);
+    updateTrades(payload.recent_trades);
+    updateLogs(payload.logs);
+    updateAutoButton(payload);
+
+    const lastUpdateEl = byId("last-update");
+    if (lastUpdateEl) {
+        lastUpdateEl.textContent = "آخرین بروزرسانی: " + new Date().toLocaleTimeString("fa-IR");
+    }
+}
+
+async function fetchTelemetry() {
+    try {
+        const response = await fetch("/api/telemetry", {
+            method: "GET",
+            cache: "no-store",
+            headers: { "Accept": "application/json" }
+        });
+
+        if (!response.ok) {
+            throw new Error(`Telemetry HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        updateDashboard(data);
+        setConnectionState(true, "اتصال API برقرار است");
+    } catch (error) {
+        console.error("Telemetry fetch error:", error);
+        setConnectionState(false, "اتصال API برقرار نیست");
+    }
+}
+
+async function triggerAction(action) {
+    if (isRequestInProgress) return;
+    setButtonBusy(true);
+
+    try {
+        const response = await fetch("/api/action", {
+            method: "POST",
+            cache: "no-store",
+            headers: {
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+            },
+            body: JSON.stringify({
+                action: action,
+                amount: 0.02
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`Action HTTP ${response.status}`);
+        }
+
+        const sourceButton =
+            action === "buy" ? byId("buy-btn") :
+            action === "sell" ? byId("sell-btn") :
+            action === "panic" ? byId("panic-btn") :
+            byId("auto-btn");
+
+        flashElement(sourceButton, "success");
+        await fetchTelemetry();
+    } catch (error) {
+        console.error("Action error:", error);
+
+        const sourceButton =
+            action === "buy" ? byId("buy-btn") :
+            action === "sell" ? byId("sell-btn") :
+            action === "panic" ? byId("panic-btn") :
+            byId("auto-btn");
+
+        flashElement(sourceButton, "error");
+        setConnectionState(false, "خطا در اجرای فرمان");
+    } finally {
+        setButtonBusy(false);
+    }
+}
+
+setInterval(fetchTelemetry, POLL_INTERVAL_MS);
+fetchTelemetry();
