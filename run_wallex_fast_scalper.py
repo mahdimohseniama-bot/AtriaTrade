@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
-AtriaTrade Multi-Asset Live Paper Scalper v3.5 (State Persistence & Crash Recovery)
+AtriaTrade Multi-Asset Live Paper Scalper v4.2 (Anti-Overtrading Cooldown)
 - Dual Markets: BTCUSDT & ETHUSDT (1m Wallex UDF)
-- Smart SMC Sweep Strategy
+- Smart SMC Sweep Strategy + Order Book Spread Filter
+- Realistic Fee Deduction (0.2% Taker per leg) & Dynamic Slippage
 - Auto-Breakeven & Trailing Stop Engine
+- Anti-Overtrading Cooldown (180s per symbol after exit)
 - Crash Recovery with active_positions.json
-- Real-time English Telemetry & Persistent JSON Journaling
+- Real-time Telemetry & Persistent JSON Journaling
 """
 
 import os
@@ -18,13 +20,17 @@ from datetime import datetime
 JOURNAL_FILE = "trade_journal.json"
 STATE_FILE = "active_positions.json"
 SYMBOLS = ["BTCUSDT", "ETHUSDT"]
-RESOLUTION = "1"        # 1-minute candles
+RESOLUTION = "1"
 LIMIT_CANDLES = 50
-CHECK_INTERVAL = 8      # Polling every 8 seconds
+CHECK_INTERVAL = 8
+MAX_ALLOWED_SPREAD_PCT = 0.08  # Max 0.08% spread allowed for scalping entries
+FEE_RATE = 0.002               # 0.20% Taker fee per side
+COOLDOWN_SECONDS = 180         # 3 minutes cooldown per symbol after trade exit
 
 INITIAL_BALANCE = 100.0
 paper_balance = INITIAL_BALANCE
-open_positions = {}     # symbol -> position dict
+open_positions = {}
+symbol_cooldowns = {}
 
 def log(msg: str):
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
@@ -93,6 +99,27 @@ def fetch_candles(symbol: str):
         pass
     return None
 
+def fetch_orderbook_spread(symbol: str):
+    url = f"https://api.wallex.ir/v1/depth?symbol={symbol}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Linux; Android 10; Mobile)",
+        "Accept": "application/json"
+    }
+    try:
+        resp = requests.get(url, headers=headers, timeout=4)
+        if resp.status_code == 200:
+            data = resp.json().get("result", {})
+            bids = data.get("bid", [])
+            asks = data.get("ask", [])
+            if bids and asks:
+                best_bid = float(bids[0]["price"])
+                best_ask = float(asks[0]["price"])
+                spread_pct = ((best_ask - best_bid) / best_bid) * 100.0
+                return spread_pct, best_bid, best_ask
+    except Exception:
+        pass
+    return None, None, None
+
 def analyze_smc_scalp(candles):
     if len(candles) < 12:
         return "HOLD", 0.0, 0.0
@@ -102,7 +129,7 @@ def analyze_smc_scalp(candles):
     prev2 = candles[-3]
 
     volatility = max(c["high"] - c["low"], abs(c["high"] - prev["close"]))
-    min_buffer = max(volatility * 1.2, c["close"] * 0.0020)
+    min_buffer = max(volatility * 1.2, c["close"] * 0.0025)
 
     if prev["low"] < prev2["low"] and c["close"] > prev["high"]:
         entry = c["close"]
@@ -158,10 +185,10 @@ def update_risk_management(pos, current_price):
     return updated
 
 def main():
-    global paper_balance, open_positions
-    print("=" * 68, flush=True)
-    print("AtriaTrade Scalper v3.5 (State Guard & Crash Recovery)", flush=True)
-    print(f"Markets: {', '.join(SYMBOLS)} | TF: {RESOLUTION}m | Interval: {CHECK_INTERVAL}s", flush=True)
+    global paper_balance, open_positions, symbol_cooldowns
+    print("=" * 72, flush=True)
+    print("AtriaTrade Scalper v4.2 (Anti-Overtrading Cooldown Engine)", flush=True)
+    print(f"Markets: {', '.join(SYMBOLS)} | TF: {RESOLUTION}m | Cooldown: {COOLDOWN_SECONDS}s", flush=True)
 
     open_positions = StateManager.load_positions()
     if open_positions:
@@ -171,7 +198,7 @@ def main():
     else:
         log("[STATE] No persisted positions found. Ready for fresh setups.")
 
-    print("=" * 68, flush=True)
+    print("=" * 72, flush=True)
 
     trade_counter = int(time.time())
 
@@ -179,6 +206,7 @@ def main():
         try:
             status_summary = []
             state_changed = False
+            now_ts = time.time()
 
             for symbol in SYMBOLS:
                 candles = fetch_candles(symbol)
@@ -200,14 +228,21 @@ def main():
                     hit_tp = (current_price >= tp) if direction == "BUY" else (current_price <= tp)
                     hit_sl = (current_price <= sl) if direction == "BUY" else (current_price >= sl)
 
-                    pnl_pct = ((current_price - entry) / entry * 100) if direction == "BUY" else ((entry - current_price) / entry * 100)
+                    gross_pnl_pct = ((current_price - entry) / entry * 100) if direction == "BUY" else ((entry - current_price) / entry * 100)
 
                     if hit_tp or hit_sl:
                         reason = "TP_HIT" if hit_tp else ("TRAILING_SL_HIT" if pos.get("is_be") else "SL_HIT")
-                        realized_pnl = (pos["size"] * (pnl_pct / 100))
-                        paper_balance += realized_pnl
+                        gross_pnl_usd = pos["size"] * (gross_pnl_pct / 100.0)
+                        
+                        entry_fee = pos["size"] * FEE_RATE
+                        exit_fee = (pos["size"] + gross_pnl_usd) * FEE_RATE
+                        total_fee = entry_fee + exit_fee
+                        net_pnl_usd = gross_pnl_usd - total_fee
+                        net_pnl_pct = (net_pnl_usd / pos["size"]) * 100.0
 
-                        log(f"[EXIT] {symbol} {direction} | {reason} @ {current_price:.2f} | PnL: {pnl_pct:+.2f}% (${realized_pnl:+.2f}) | Balance: ${paper_balance:.2f}")
+                        paper_balance += net_pnl_usd
+
+                        log(f"[EXIT] {symbol} {direction} | {reason} @ {current_price:.2f} | Net: {net_pnl_pct:+.2f}% (${net_pnl_usd:+.2f}) [Fee: -${total_fee:.2f}] | Bal: ${paper_balance:.2f}")
 
                         FastJournal.record_event({
                             "event": "EXIT",
@@ -215,42 +250,65 @@ def main():
                             "symbol": symbol,
                             "direction": direction,
                             "exit_price": current_price,
-                            "pnl_pct": round(pnl_pct, 2),
-                            "pnl_usd": round(realized_pnl, 2),
+                            "gross_pnl_usd": round(gross_pnl_usd, 2),
+                            "fees_usd": round(total_fee, 2),
+                            "pnl_usd": round(net_pnl_usd, 2),
+                            "pnl_pct": round(net_pnl_pct, 2),
                             "reason": reason,
                             "balance": round(paper_balance, 2),
                             "timestamp": datetime.now().isoformat()
                         })
                         del open_positions[symbol]
+                        symbol_cooldowns[symbol] = now_ts + COOLDOWN_SECONDS
+                        log(f"[COOLDOWN] {symbol} locked for {COOLDOWN_SECONDS}s to avoid overtrading.")
                         state_changed = True
                     else:
                         be_tag = "[BE]" if pos.get("is_be") else ""
-                        status_summary.append(f"{symbol}: {direction}{be_tag} ({pnl_pct:+.2f}%)")
+                        status_summary.append(f"{symbol}: {direction}{be_tag} ({gross_pnl_pct:+.2f}%)")
 
                 else:
+                    # Check Cooldown
+                    if symbol in symbol_cooldowns:
+                        remaining = int(symbol_cooldowns[symbol] - now_ts)
+                        if remaining > 0:
+                            status_summary.append(f"{symbol}: COOLDOWN({remaining}s)")
+                            continue
+                        else:
+                            del symbol_cooldowns[symbol]
+
                     signal, sl, tp = analyze_smc_scalp(candles)
                     if signal in ["BUY", "SELL"]:
+                        spread_pct, best_bid, best_ask = fetch_orderbook_spread(symbol)
+                        if spread_pct is not None and spread_pct > MAX_ALLOWED_SPREAD_PCT:
+                            log(f"[SPREAD VETO] {symbol} {signal} rejected! Spread: {spread_pct:.3f}% > {MAX_ALLOWED_SPREAD_PCT}%")
+                            status_summary.append(f"{symbol}: SPREAD_BLOCK({spread_pct:.2f}%)")
+                            continue
+
                         trade_counter += 1
                         trade_size = 20.0
+                        actual_entry = best_ask if (signal == "BUY" and best_ask) else (best_bid if (signal == "SELL" and best_bid) else current_price)
+
                         open_positions[symbol] = {
                             "trade_id": f"SMC-{trade_counter}",
                             "symbol": symbol,
                             "direction": signal,
-                            "entry": current_price,
+                            "entry": actual_entry,
                             "sl": sl,
                             "tp": tp,
                             "size": trade_size,
+                            "spread_pct": spread_pct,
                             "is_be": False,
                             "timestamp": datetime.now().isoformat()
                         }
                         state_changed = True
-                        log(f"[ENTRY] {symbol} {signal} @ {current_price:.2f} | TP: {tp:.2f} | SL: {sl:.2f} | Size: ${trade_size}")
+                        log(f"[ENTRY] {symbol} {signal} @ {actual_entry:.2f} (Spread: {spread_pct if spread_pct else 0:.3f}%) | TP: {tp:.2f} | SL: {sl:.2f} | Size: ${trade_size}")
                         FastJournal.record_event({
                             "event": "ENTRY",
                             "trade_id": f"SMC-{trade_counter}",
                             "symbol": symbol,
                             "direction": signal,
-                            "entry_price": current_price,
+                            "entry_price": actual_entry,
+                            "spread_pct": spread_pct,
                             "sl": sl,
                             "tp": tp,
                             "size": trade_size,
