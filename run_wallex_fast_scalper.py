@@ -1,337 +1,146 @@
-#!/usr/bin/env python3
-"""
-AtriaTrade Multi-Asset Live Paper Scalper v4.2 (Anti-Overtrading Cooldown)
-- Dual Markets: BTCUSDT & ETHUSDT (1m Wallex UDF)
-- Smart SMC Sweep Strategy + Order Book Spread Filter
-- Realistic Fee Deduction (0.2% Taker per leg) & Dynamic Slippage
-- Auto-Breakeven & Trailing Stop Engine
-- Anti-Overtrading Cooldown (180s per symbol after exit)
-- Crash Recovery with active_positions.json
-- Real-time Telemetry & Persistent JSON Journaling
-"""
-
-import os
-import sys
-import time
-import json
-import requests
+import os, time, json, requests
 from datetime import datetime
 
-JOURNAL_FILE = "trade_journal.json"
-STATE_FILE = "active_positions.json"
+BASE_URL = "https://api.wallex.ir"
 SYMBOLS = ["BTCUSDT", "ETHUSDT"]
-RESOLUTION = "1"
-LIMIT_CANDLES = 50
-CHECK_INTERVAL = 8
-MAX_ALLOWED_SPREAD_PCT = 0.08  # Max 0.08% spread allowed for scalping entries
-FEE_RATE = 0.002               # 0.20% Taker fee per side
-COOLDOWN_SECONDS = 180         # 3 minutes cooldown per symbol after trade exit
+POLL_INTERVAL = 5 # کمی بیشترش کردیم که فشار کمتر بشه
+TAKER_FEE_RATE = 0.002
+MAX_SPREAD_RATIO = 0.0008
+COOLDOWN_SECONDS = 180
+DEPTH_IMBALANCE_MIN = 1.25
+TAKE_PROFIT_PCT = 0.012
+STOP_LOSS_PCT = 0.006
+POSITION_SIZE_USD = 50.0
 
-INITIAL_BALANCE = 100.0
-paper_balance = INITIAL_BALANCE
-open_positions = {}
-symbol_cooldowns = {}
+POSITIONS_FILE = "active_positions.json"
+JOURNAL_FILE = "trade_journal.json"
+last_exit_times = {}
 
-def log(msg: str):
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
-
-class StateManager:
-    @staticmethod
-    def load_positions():
-        if os.path.exists(STATE_FILE):
-            try:
-                with open(STATE_FILE, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except Exception as e:
-                log(f"[WARN] Failed to load saved state: {e}")
-        return {}
-
-    @staticmethod
-    def save_positions(positions):
+def load_json(filepath, default):
+    if os.path.exists(filepath):
         try:
-            with open(STATE_FILE, "w", encoding="utf-8") as f:
-                json.dump(positions, f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            log(f"[ERROR] Failed to persist active positions: {e}")
+            with open(filepath, 'r') as f: return json.load(f)
+        except: return default
+    return default
 
-class FastJournal:
-    @staticmethod
-    def record_event(data):
-        journal = []
-        if os.path.exists(JOURNAL_FILE):
-            try:
-                with open(JOURNAL_FILE, "r", encoding="utf-8") as f:
-                    journal = json.load(f)
-            except Exception:
-                journal = []
-        journal.append(data)
-        with open(JOURNAL_FILE, "w", encoding="utf-8") as f:
-            json.dump(journal, f, indent=2, ensure_ascii=False)
+def save_json(filepath, data):
+    with open(filepath, 'w') as f: json.dump(data, f, indent=2)
 
-def fetch_candles(symbol: str):
-    to_time = int(time.time())
-    resolution_seconds = int(RESOLUTION) * 60
-    from_time = to_time - (LIMIT_CANDLES * resolution_seconds)
-    
-    url = f"https://api.wallex.ir/v1/udf/history?symbol={symbol}&resolution={RESOLUTION}&from={from_time}&to={to_time}"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Linux; Android 10; Mobile)",
-        "Accept": "application/json"
-    }
-    
+def fetch_orderbook(symbol):
     try:
-        resp = requests.get(url, headers=headers, timeout=5)
-        if resp.status_code == 200:
-            data = resp.json()
-            if data.get("s") == "ok" and "t" in data and len(data["t"]) > 0:
-                candles = []
-                for i in range(len(data["t"])):
-                    candles.append({
-                        "time": data["t"][i],
-                        "open": float(data["o"][i]),
-                        "high": float(data["h"][i]),
-                        "low": float(data["l"][i]),
-                        "close": float(data["c"][i]),
-                        "volume": float(data["v"][i]),
-                    })
-                return candles
-    except Exception:
-        pass
-    return None
+        url = f"{BASE_URL}/v1/depth?symbol={symbol}"
+        res = requests.get(url, timeout=5)
 
-def fetch_orderbook_spread(symbol: str):
-    url = f"https://api.wallex.ir/v1/depth?symbol={symbol}"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Linux; Android 10; Mobile)",
-        "Accept": "application/json"
-    }
-    try:
-        resp = requests.get(url, headers=headers, timeout=4)
-        if resp.status_code == 200:
-            data = resp.json().get("result", {})
-            bids = data.get("bid", [])
-            asks = data.get("ask", [])
-            if bids and asks:
-                best_bid = float(bids[0]["price"])
-                best_ask = float(asks[0]["price"])
-                spread_pct = ((best_ask - best_bid) / best_bid) * 100.0
-                return spread_pct, best_bid, best_ask
-    except Exception:
-        pass
-    return None, None, None
+        print(
+            f"[{datetime.now().strftime('%H:%M:%S')}] "
+            f"📡 {symbol} | HTTP {res.status_code}"
+        )
 
-def analyze_smc_scalp(candles):
-    if len(candles) < 12:
-        return "HOLD", 0.0, 0.0
+        if res.status_code != 200:
+            print(
+                f"[{datetime.now().strftime('%H:%M:%S')}] "
+                f"⚠️ API response for {symbol}: {res.text[:300]}"
+            )
+            return None, None, 1.0
 
-    c = candles[-1]
-    prev = candles[-2]
-    prev2 = candles[-3]
+        try:
+            payload = res.json()
+        except ValueError as e:
+            print(
+                f"[{datetime.now().strftime('%H:%M:%S')}] "
+                f"⚠️ Invalid JSON for {symbol}: {e}"
+            )
+            print(f"Raw response: {res.text[:300]}")
+            return None, None, 1.0
 
-    volatility = max(c["high"] - c["low"], abs(c["high"] - prev["close"]))
-    min_buffer = max(volatility * 1.2, c["close"] * 0.0025)
+        result = payload.get("result", payload)
 
-    if prev["low"] < prev2["low"] and c["close"] > prev["high"]:
-        entry = c["close"]
-        sl = entry - min_buffer
-        tp = entry + (min_buffer * 2.2)
-        return "BUY", sl, tp
+        bids = result.get("bid", result.get("bids", []))
+        asks = result.get("ask", result.get("asks", []))
 
-    elif prev["high"] > prev2["high"] and c["close"] < prev["low"]:
-        entry = c["close"]
-        sl = entry + min_buffer
-        tp = entry - (min_buffer * 2.2)
-        return "SELL", sl, tp
+        if not bids or not asks:
+            print(
+                f"[{datetime.now().strftime('%H:%M:%S')}] "
+                f"⚠️ Empty orderbook for {symbol} | "
+                f"keys={list(result.keys()) if isinstance(result, dict) else type(result)}"
+            )
+            return None, None, 1.0
 
-    return "HOLD", 0.0, 0.0
+        def price_of(level):
+            if isinstance(level, dict):
+                return float(level.get("price", level.get("rate")))
+            return float(level[0])
 
-def update_risk_management(pos, current_price):
-    direction = pos["direction"]
-    entry = pos["entry"]
-    tp = pos["tp"]
-    sl = pos["sl"]
-    is_be = pos.get("is_be", False)
-    target_dist = abs(tp - entry)
-    updated = False
+        def quantity_of(level):
+            if isinstance(level, dict):
+                return float(
+                    level.get(
+                        "quantity",
+                        level.get("amount", level.get("volume", 0))
+                    )
+                )
+            return float(level[1])
 
-    if direction == "BUY":
-        current_gain = current_price - entry
-        if not is_be and current_gain >= (target_dist * 0.5):
-            pos["sl"] = entry + (target_dist * 0.05)
-            pos["is_be"] = True
-            updated = True
-            log(f"[RISK] {pos['symbol']} BE Activated! SL moved to {pos['sl']:.2f}")
-        elif is_be and current_gain >= (target_dist * 0.7):
-            new_sl = entry + (target_dist * 0.4)
-            if new_sl > pos["sl"]:
-                pos["sl"] = new_sl
-                updated = True
-                log(f"[RISK] {pos['symbol']} Trailing Stop adjusted to {pos['sl']:.2f}")
+        best_bid = price_of(bids[0])
+        best_ask = price_of(asks[0])
 
-    elif direction == "SELL":
-        current_gain = entry - current_price
-        if not is_be and current_gain >= (target_dist * 0.5):
-            pos["sl"] = entry - (target_dist * 0.05)
-            pos["is_be"] = True
-            updated = True
-            log(f"[RISK] {pos['symbol']} BE Activated! SL moved to {pos['sl']:.2f}")
-        elif is_be and current_gain >= (target_dist * 0.7):
-            new_sl = entry - (target_dist * 0.4)
-            if new_sl < pos["sl"]:
-                pos["sl"] = new_sl
-                updated = True
-                log(f"[RISK] {pos['symbol']} Trailing Stop adjusted to {pos['sl']:.2f}")
+        bid_vol = sum(quantity_of(level) for level in bids[:5])
+        ask_vol = sum(quantity_of(level) for level in asks[:5])
 
-    return updated
+        imbalance = bid_vol / ask_vol if ask_vol > 0 else 1.0
+
+        print(
+            f"[{datetime.now().strftime('%H:%M:%S')}] "
+            f"✅ {symbol} | bid={best_bid} | ask={best_ask} | "
+            f"imb={imbalance:.3f}"
+        )
+
+        return best_bid, best_ask, imbalance
+
+    except requests.RequestException as e:
+        print(
+            f"[{datetime.now().strftime('%H:%M:%S')}] "
+            f"🌐 Network Error for {symbol}: {type(e).__name__}: {e}"
+        )
+    except (KeyError, TypeError, ValueError, IndexError) as e:
+        print(
+            f"[{datetime.now().strftime('%H:%M:%S')}] "
+            f"🧩 Data Format Error for {symbol}: {type(e).__name__}: {e}"
+        )
+    except Exception as e:
+        print(
+            f"[{datetime.now().strftime('%H:%M:%S')}] "
+            f"❌ Unexpected Error for {symbol}: {type(e).__name__}: {e}"
+        )
+
+    return None, None, 1.0
 
 def main():
-    global paper_balance, open_positions, symbol_cooldowns
-    print("=" * 72, flush=True)
-    print("AtriaTrade Scalper v4.2 (Anti-Overtrading Cooldown Engine)", flush=True)
-    print(f"Markets: {', '.join(SYMBOLS)} | TF: {RESOLUTION}m | Cooldown: {COOLDOWN_SECONDS}s", flush=True)
-
-    open_positions = StateManager.load_positions()
-    if open_positions:
-        log(f"[RECOVERY] Restored {len(open_positions)} active positions from disk.")
-        for sym, p in open_positions.items():
-            log(f" -> Restored {sym} {p['direction']} @ {p['entry']:.2f} | TP: {p['tp']:.2f} | SL: {p['sl']:.2f}")
-    else:
-        log("[STATE] No persisted positions found. Ready for fresh setups.")
-
-    print("=" * 72, flush=True)
-
-    trade_counter = int(time.time())
-
+    print("🚀 AtriaTrade v4.4 [Debugger Enabled]")
+    positions, journal = load_json(POSITIONS_FILE, {}), load_json(JOURNAL_FILE, [])
     while True:
-        try:
-            status_summary = []
-            state_changed = False
-            now_ts = time.time()
+        now, now_str = time.time(), datetime.now().strftime("%H:%M:%S")
+        print(f"[{now_str}] 🔎 Scanning markets...")
+        for sym in SYMBOLS:
+            best_bid, best_ask, imb = fetch_orderbook(sym)
+            if not best_bid: continue
+            
+            mid = (best_bid + best_ask) / 2.0
+            spread = (best_ask - best_bid) / mid
+            
+            if sym in positions:
+                pos = positions[sym]
+                pnl = ((best_bid - pos["entry_price"]) / pos["entry_price"]) - (2 * TAKER_FEE_RATE)
+                if pnl >= TAKE_PROFIT_PCT or pnl <= -STOP_LOSS_PCT:
+                    print(f"[{now_str}] ✅ Exit {sym} | PnL: {pnl*100:.2f}%")
+                    journal.append({"symbol": sym, "pnl": round(pnl*100, 3)})
+                    save_json(JOURNAL_FILE, journal)
+                    del positions[sym]; save_json(POSITIONS_FILE, positions)
+            elif (now - last_exit_times.get(sym, 0)) > COOLDOWN_SECONDS:
+                if spread <= MAX_SPREAD_RATIO and imb >= DEPTH_IMBALANCE_MIN:
+                    positions[sym] = {"entry_price": best_ask, "entry_time": now_str, "size_usd": POSITION_SIZE_USD}
+                    save_json(POSITIONS_FILE, positions)
+                    print(f"[{now_str}] 🔥 [ENTRY] {sym} @ {best_ask:.2f} | Imb: {imb:.2f}x")
+        time.sleep(POLL_INTERVAL)
 
-            for symbol in SYMBOLS:
-                candles = fetch_candles(symbol)
-                if not candles:
-                    continue
-
-                current_price = candles[-1]["close"]
-
-                if symbol in open_positions:
-                    pos = open_positions[symbol]
-                    if update_risk_management(pos, current_price):
-                        state_changed = True
-
-                    direction = pos["direction"]
-                    entry = pos["entry"]
-                    tp = pos["tp"]
-                    sl = pos["sl"]
-
-                    hit_tp = (current_price >= tp) if direction == "BUY" else (current_price <= tp)
-                    hit_sl = (current_price <= sl) if direction == "BUY" else (current_price >= sl)
-
-                    gross_pnl_pct = ((current_price - entry) / entry * 100) if direction == "BUY" else ((entry - current_price) / entry * 100)
-
-                    if hit_tp or hit_sl:
-                        reason = "TP_HIT" if hit_tp else ("TRAILING_SL_HIT" if pos.get("is_be") else "SL_HIT")
-                        gross_pnl_usd = pos["size"] * (gross_pnl_pct / 100.0)
-                        
-                        entry_fee = pos["size"] * FEE_RATE
-                        exit_fee = (pos["size"] + gross_pnl_usd) * FEE_RATE
-                        total_fee = entry_fee + exit_fee
-                        net_pnl_usd = gross_pnl_usd - total_fee
-                        net_pnl_pct = (net_pnl_usd / pos["size"]) * 100.0
-
-                        paper_balance += net_pnl_usd
-
-                        log(f"[EXIT] {symbol} {direction} | {reason} @ {current_price:.2f} | Net: {net_pnl_pct:+.2f}% (${net_pnl_usd:+.2f}) [Fee: -${total_fee:.2f}] | Bal: ${paper_balance:.2f}")
-
-                        FastJournal.record_event({
-                            "event": "EXIT",
-                            "trade_id": pos["trade_id"],
-                            "symbol": symbol,
-                            "direction": direction,
-                            "exit_price": current_price,
-                            "gross_pnl_usd": round(gross_pnl_usd, 2),
-                            "fees_usd": round(total_fee, 2),
-                            "pnl_usd": round(net_pnl_usd, 2),
-                            "pnl_pct": round(net_pnl_pct, 2),
-                            "reason": reason,
-                            "balance": round(paper_balance, 2),
-                            "timestamp": datetime.now().isoformat()
-                        })
-                        del open_positions[symbol]
-                        symbol_cooldowns[symbol] = now_ts + COOLDOWN_SECONDS
-                        log(f"[COOLDOWN] {symbol} locked for {COOLDOWN_SECONDS}s to avoid overtrading.")
-                        state_changed = True
-                    else:
-                        be_tag = "[BE]" if pos.get("is_be") else ""
-                        status_summary.append(f"{symbol}: {direction}{be_tag} ({gross_pnl_pct:+.2f}%)")
-
-                else:
-                    # Check Cooldown
-                    if symbol in symbol_cooldowns:
-                        remaining = int(symbol_cooldowns[symbol] - now_ts)
-                        if remaining > 0:
-                            status_summary.append(f"{symbol}: COOLDOWN({remaining}s)")
-                            continue
-                        else:
-                            del symbol_cooldowns[symbol]
-
-                    signal, sl, tp = analyze_smc_scalp(candles)
-                    if signal in ["BUY", "SELL"]:
-                        spread_pct, best_bid, best_ask = fetch_orderbook_spread(symbol)
-                        if spread_pct is not None and spread_pct > MAX_ALLOWED_SPREAD_PCT:
-                            log(f"[SPREAD VETO] {symbol} {signal} rejected! Spread: {spread_pct:.3f}% > {MAX_ALLOWED_SPREAD_PCT}%")
-                            status_summary.append(f"{symbol}: SPREAD_BLOCK({spread_pct:.2f}%)")
-                            continue
-
-                        trade_counter += 1
-                        trade_size = 20.0
-                        actual_entry = best_ask if (signal == "BUY" and best_ask) else (best_bid if (signal == "SELL" and best_bid) else current_price)
-
-                        open_positions[symbol] = {
-                            "trade_id": f"SMC-{trade_counter}",
-                            "symbol": symbol,
-                            "direction": signal,
-                            "entry": actual_entry,
-                            "sl": sl,
-                            "tp": tp,
-                            "size": trade_size,
-                            "spread_pct": spread_pct,
-                            "is_be": False,
-                            "timestamp": datetime.now().isoformat()
-                        }
-                        state_changed = True
-                        log(f"[ENTRY] {symbol} {signal} @ {actual_entry:.2f} (Spread: {spread_pct if spread_pct else 0:.3f}%) | TP: {tp:.2f} | SL: {sl:.2f} | Size: ${trade_size}")
-                        FastJournal.record_event({
-                            "event": "ENTRY",
-                            "trade_id": f"SMC-{trade_counter}",
-                            "symbol": symbol,
-                            "direction": signal,
-                            "entry_price": actual_entry,
-                            "spread_pct": spread_pct,
-                            "sl": sl,
-                            "tp": tp,
-                            "size": trade_size,
-                            "timestamp": datetime.now().isoformat()
-                        })
-                    else:
-                        status_summary.append(f"{symbol}: {current_price:.1f}")
-
-            if state_changed:
-                StateManager.save_positions(open_positions)
-
-            active_info = " | ".join(status_summary)
-            log(f"[STATUS] Active Pos: {len(open_positions)} | {active_info}")
-
-            time.sleep(CHECK_INTERVAL)
-
-        except KeyboardInterrupt:
-            log("[HALT] Scalper safely stopped by user. State is saved.")
-            StateManager.save_positions(open_positions)
-            break
-        except Exception as e:
-            log(f"[EXC] Loop error: {e}")
-            time.sleep(CHECK_INTERVAL)
-
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__": main()

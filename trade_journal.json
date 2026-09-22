@@ -1,0 +1,55 @@
+[
+  {
+    "event": "ENTRY",
+    "time": "2026-09-21T10:41:08.486172",
+    "trade_id": "382b22c7-6521-4a8f-9c8e-be62c7d87895",
+    "symbol": "BTCUSDT",
+    "side": "SELL",
+    "entry_price": 81592.79,
+    "quantity": 0.002451196974634646,
+    "stop_loss": 81957.26736,
+    "take_profit": 80863.83527999998,
+    "usdt_balance": 1000.0,
+    "btc_balance": 0.0
+  },
+  {
+    "event": "STOPPED_WITH_OPEN_POSITION",
+    "time": "2026-09-21T10:43:52.249978",
+    "trade_id": "382b22c7-6521-4a8f-9c8e-be62c7d87895",
+    "symbol": "BTCUSDT",
+    "side": "SELL",
+    "entry_time": "2026-09-21T10:41:08.485582",
+    "entry_price": 81592.79,
+    "current_price": null,
+    "stop_loss": 81957.26736,
+    "take_profit": 80863.83527999998,
+    "quantity": 0.002451196974634646,
+    "usdt_balance": 1000.0,
+    "btc_balance": 0.0
+  },
+  {
+    "event": "ENTRY",
+    "trade_id": "FAST-1789976401",
+    "direction": "SELL",
+    "entry_price": 81525.84,
+    "sl": 81648.12875999999,
+    "tp": 81281.26247999999,
+    "timestamp": "2026-09-21T11:13:16.648903"
+  },
+  {
+    "event": "STOPPED_WITH_OPEN_POSITION",
+    "trade_id": "FAST-1789976401",
+    "timestamp": "2026-09-21T11:13:37.013289"
+  },
+  {
+    "event": "ENTRY",
+    "trade_id": "SMC-1789976625",
+    "symbol": "BTCUSDT",
+    "direction": "SELL",
+    "entry_price": 81525.84,
+    "sl": 81688.89168,
+    "tp": 81167.12630399999,
+    "size": 20.0,
+    "timestamp": "2026-09-21T11:13:45.457990"
+  }
+]

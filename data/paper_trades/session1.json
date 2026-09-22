@@ -5,8 +5,8 @@
   "initial_capital": 10000.0,
   "current_capital": 11000.0,
   "total_pnl": 1000.0,
-  "created_at": "2026-09-20T08:01:16+00:00",
-  "updated_at": "2026-09-20T08:01:16+00:00",
+  "created_at": "2026-09-22T11:55:05+00:00",
+  "updated_at": "2026-09-22T11:55:05+00:00",
   "trades": [
     {
       "trade_id": "session1_TRADE_00001",
@@ -20,7 +20,7 @@
       "fees": 0.0,
       "pnl": 1000.0,
       "currency": "USDT",
-      "timestamp": "2026-09-20T08:01:16+00:00"
+      "timestamp": "2026-09-22T11:55:05+00:00"
     }
   ]
 }
