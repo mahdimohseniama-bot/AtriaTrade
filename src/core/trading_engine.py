@@ -1,151 +1,80 @@
-"""Trading Engine module for orchestrating signals, execution, and portfolio management."""
-from typing import Dict, Any, Optional
-import time
+import logging
+from typing import Dict, Any, List, Optional
+from src.core.fvg_detector import FVGDetector, Candle
+from src.core.ote_engine import OTEEngine, TradeDirection
+from src.core.risk_manager import RiskManager, RiskConfig
 
+logger = logging.getLogger(__name__)
 
 class TradingEngine:
-    def __init__(
-        self,
-        portfolio_manager: Optional[Any] = None,
-        risk_manager: Optional[Any] = None,
-        order_executor: Optional[Any] = None,
-        profit_reserve_manager: Optional[Any] = None,
-        **kwargs
-    ):
-        # نگاشت سازگار برای پارامترهای تستی و ماژولار
-        self.portfolio_manager = portfolio_manager or kwargs.get("portfolio")
-        self.risk_manager = risk_manager or kwargs.get("risk")
-        self.order_executor = order_executor or kwargs.get("executor")
-        self.profit_reserve_manager = profit_reserve_manager or kwargs.get("reserve")
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        self.config = config or {}
+        self.fvg_detector = FVGDetector(min_gap_percent=0.1)
+        self.ote_engine = OTEEngine(sweet_spot=0.705)
+        self.risk_manager = RiskManager(config=RiskConfig(total_capital=self.config.get("initial_balance", 1000.0)))
+        logger.info("TradingEngine initialized (Lightweight Native SMC + Risk).")
 
-        self.is_running = False
-        self.last_tick_time = 0.0
-        self._entry_prices: Dict[str, float] = {}
+    def analyze_market_data(self, candles: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """تحلیل سبک SMC بدون نیاز به دیتای حجیم یا پانداس"""
+        if not candles or len(candles) < 3:
+            return {"action": "HOLD", "reason": "Insufficient candle data"}
 
-    def start(self) -> None:
-        self.is_running = True
+        candle_objs = [
+            Candle(
+                open=c['open'],
+                high=c['high'],
+                low=c['low'],
+                close=c['close'],
+                timestamp=c.get('timestamp', 0)
+            ) for c in candles
+        ]
 
-    def stop(self) -> None:
-        self.is_running = False
+        # 1. تشخیص FVG
+        fvgs = self.fvg_detector.detect_fvgs(candle_objs)
 
-    def process_tick(self, tick: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Processes an incoming market tick and executes simulated paper trades."""
-        if not self.is_running:
-            return None
+        # 2. محاسبه OTE
+        high = max(c.high for c in candle_objs)
+        low = min(c.low for c in candle_objs)
+        current_price = candle_objs[-1].close
 
-        if not isinstance(tick, dict):
-            return None
+        ote_profile = self.ote_engine.calculate_ote(
+            swing_low=low,
+            swing_high=high,
+            direction=TradeDirection.BULLISH
+        )
 
-        symbol = tick.get("symbol")
-        price = tick.get("price")
-        signal = tick.get("signal")
-        confidence = tick.get("confidence", 1.0)
+        in_ote = self.ote_engine.is_in_ote_zone(current_price, ote_profile)
 
-        if not symbol or price is None or price <= 0:
-            return None
+        action = "HOLD"
+        reason = "Scanning for SMC confluence"
 
-        if signal not in ["BUY", "SELL", "HOLD"]:
-            return None
+        bullish_fvgs = [f for f in fvgs if f.fvg_type.value == "bullish"]
 
-        if signal == "HOLD":
-            return None
+        if bullish_fvgs and in_ote:
+            action = "BUY"
+            reason = "Confluence: Bullish FVG in OTE sweet zone"
+        elif not in_ote:
+            reason = "Price out of OTE premium/discount range"
 
-        self.last_tick_time = time.time()
+        # 3. مدیریت ریسک و محاسبه حجم مجاز ورود
+        stop_loss = current_price * 0.985
+        take_profit = current_price * 1.03
 
-        if signal == "BUY":
-            qty = tick.get("quantity") or tick.get("qty")
-            if not qty:
-                # محاسبه حجم پیش‌فرض بر اساس پورتفولیو
-                if self.portfolio_manager and hasattr(self.portfolio_manager, "cash"):
-                    alloc_cash = self.portfolio_manager.cash * 0.5
-                    qty = alloc_cash / price
-                else:
-                    qty = 0.1
+        size_result = self.risk_manager.calculate_position_size(
+            entry_price=current_price,
+            stop_loss=stop_loss,
+            capital=self.config.get("initial_balance", 1000.0),
+            side="BUY"
+        )
+        pos_size = size_result.get("units", 0) if isinstance(size_result, dict) else size_result
 
-            # بررسی و ثبت خرید
-            if self.portfolio_manager:
-                if hasattr(self.portfolio_manager, "can_allocate"):
-                    if not self.portfolio_manager.can_allocate(symbol, qty * price):
-                        return None
-
-                buy_res = {}
-                if hasattr(self.portfolio_manager, "record_buy"):
-                    buy_res = self.portfolio_manager.record_buy(symbol=symbol, quantity=qty, price=price) or {}
-                if isinstance(buy_res, dict) and buy_res.get("status") == "REJECTED":
-                    return None
-
-            self._entry_prices[symbol] = float(price)
-
-            return {
-                "symbol": symbol,
-                "side": "BUY",
-                "price": price,
-                "quantity": qty,
-                "status": "FILLED",
-                "timestamp": self.last_tick_time
-            }
-
-        elif signal == "SELL":
-            current_qty = 0.0
-            if self.portfolio_manager:
-                if hasattr(self.portfolio_manager, "get_position"):
-                    current_qty = self.portfolio_manager.get_position(symbol)
-                elif hasattr(self.portfolio_manager, "positions"):
-                    pos = self.portfolio_manager.positions.get(symbol, {})
-                    if isinstance(pos, dict):
-                        current_qty = pos.get("quantity", 0.0)
-                    else:
-                        current_qty = getattr(pos, "quantity", 0.0)
-
-            if current_qty <= 0.0:
-                return None
-
-            qty_to_sell = tick.get("quantity") or tick.get("qty") or current_qty
-            qty_to_sell = min(qty_to_sell, current_qty)
-
-            sell_res = {}
-            if self.portfolio_manager and hasattr(self.portfolio_manager, "record_sell"):
-                sell_res = self.portfolio_manager.record_sell(symbol=symbol, quantity=qty_to_sell, price=price) or {}
-
-            # محاسبه سود محقق‌شده
-            realized_pnl = 0.0
-            if isinstance(sell_res, dict) and "realized_pnl" in sell_res:
-                realized_pnl = float(sell_res["realized_pnl"])
-            else:
-                entry_p = self._entry_prices.get(symbol, price)
-                realized_pnl = (float(price) - float(entry_p)) * float(qty_to_sell)
-
-            # اگر از طریق محاسبات پورتفولیو هم سود مثبت بود ولی صفر گزارش شده بود:
-            if realized_pnl <= 0.0 and symbol in self._entry_prices:
-                entry_p = self._entry_prices[symbol]
-                if price > entry_p:
-                    realized_pnl = (float(price) - float(entry_p)) * float(qty_to_sell)
-
-            # انتقال سود به ProfitReserveManager
-            if realized_pnl > 0.0 and self.profit_reserve_manager:
-                reserve = self.profit_reserve_manager
-                if hasattr(reserve, "add_to_vault") and callable(reserve.add_to_vault):
-                    reserve.add_to_vault(realized_pnl)
-                elif hasattr(reserve, "process_trade_profit") and callable(reserve.process_trade_profit):
-                    reserve.process_trade_profit(realized_pnl)
-                elif hasattr(reserve, "process_trade_pnl") and callable(reserve.process_trade_pnl):
-                    reserve.process_trade_pnl(realized_pnl)
-                elif hasattr(reserve, "deposit") and callable(reserve.deposit):
-                    reserve.deposit(realized_pnl)
-                elif hasattr(reserve, "record_profit") and callable(reserve.record_profit):
-                    reserve.record_profit(realized_pnl)
-                else:
-                    cur_v = getattr(reserve, "vault_balance", 0.0) or 0.0
-                    setattr(reserve, "vault_balance", float(cur_v) + realized_pnl)
-
-            return {
-                "symbol": symbol,
-                "side": "SELL",
-                "price": price,
-                "quantity": qty_to_sell,
-                "realized_pnl": realized_pnl,
-                "status": "FILLED",
-                "timestamp": self.last_tick_time
-            }
-
-        return None
+        return {
+            "action": action,
+            "reason": reason,
+            "symbol": self.config.get("symbol", "USDT-IRT"),
+            "current_price": current_price,
+            "suggested_position_size": pos_size,
+            "stop_loss": stop_loss,
+            "take_profit": take_profit,
+            "active_fvgs_count": len(fvgs)
+        }
