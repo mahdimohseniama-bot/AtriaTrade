@@ -1,92 +1,70 @@
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List
 
-logger = logging.getLogger("WallexLiveOrchestrator")
+logger = logging.getLogger("AtriaTrade.WallexLiveOrchestrator")
 
 class WallexLiveOrchestrator:
-    def __init__(self, adapter, capital_manager, risk_manager=None):
-        self.adapter = adapter
-        self.capital_manager = capital_manager
-        self.risk_manager = risk_manager
-        self.active_positions: Dict[str, Dict[str, Any]] = {}
+    def __init__(
+        self,
+        execution_engine: Any,
+        heartbeat_monitor: Any,
+        rate_limiter: Any,
+        reconciler: Any
+    ):
+        self.engine = execution_engine
+        self.heartbeat = heartbeat_monitor
+        self.limiter = rate_limiter
+        self.reconciler = reconciler
 
-    def extract_price(self, ticker: Any) -> float:
-        if isinstance(ticker, dict):
-            price = ticker.get("lastPrice") or ticker.get("last_price") or ticker.get("price")
-            if price is not None:
-                return float(price)
-            raise KeyError("Ticker dict does not contain 'lastPrice' or 'last_price'")
-        elif hasattr(ticker, "last_price"):
-            return float(ticker.last_price)
-        elif hasattr(ticker, "lastPrice"):
-            return float(ticker.lastPrice)
-        raise AttributeError("Unsupported ticker format: unable to extract current price")
+    def pre_flight_check(self) -> Dict[str, Any]:
+        """
+        Validates connectivity and rate limits before attempting trading actions.
+        """
+        # 1. Rate limiter check
+        if not self.limiter.acquire(1.0):
+            logger.warning("Pre-flight rejected: rate limit reached")
+            return {"ready": False, "reason": "rate_limited"}
 
-    def process_tick(self, symbol: str) -> Optional[Dict[str, Any]]:
-        ticker = self.adapter.get_ticker(symbol)
-        current_price = self.extract_price(ticker)
-        
-        position = self.active_positions.get(symbol)
-        if not position:
-            return None
+        # 2. Heartbeat check
+        beat = self.heartbeat.ping()
+        if not beat.get("is_healthy", False) or self.heartbeat.should_pause_trading():
+            logger.error(f"Pre-flight rejected: heartbeat unhealthy ({beat.get('reason')})")
+            return {"ready": False, "reason": "network_unhealthy", "heartbeat": beat}
 
-        side = position.get("side", "BUY")
-        entry_price = position["entry_price"]
-        sl = position.get("stop_loss")
-        tp = position.get("take_profit")
-        quantity = position.get("quantity", 0.0)
+        return {"ready": True, "reason": "ok", "latency_ms": beat.get("latency_ms", 0.0)}
 
-        closed = False
-        exit_reason = None
-        exit_price = current_price
+    def execute_live_cycle(
+        self,
+        symbol: str,
+        signal: Dict[str, Any],
+        active_order_ids: List[str]
+    ) -> Dict[str, Any]:
+        """
+        Runs a safe live cycle: pre-flight check -> orphan order reconciliation -> order execution.
+        """
+        # Step 1: Pre-flight check
+        check = self.pre_flight_check()
+        if not check["ready"]:
+            return {"status": "skipped", "reason": check["reason"]}
 
-        if side == "BUY":
-            if sl is not None and current_price <= sl:
-                closed = True
-                exit_reason = "STOP_LOSS"
-            elif tp is not None and current_price >= tp:
-                closed = True
-                exit_reason = "TAKE_PROFIT"
-        elif side == "SELL":
-            if sl is not None and current_price >= sl:
-                closed = True
-                exit_reason = "STOP_LOSS"
-            elif tp is not None and current_price <= tp:
-                closed = True
-                exit_reason = "TAKE_PROFIT"
+        # Step 2: Reconcile open orders
+        recon = self.reconciler.reconcile_open_orders(symbol=symbol, internal_order_ids=active_order_ids)
+        if recon.get("orphan_orders"):
+            logger.warning(f"Detected orphan orders: {recon['orphan_orders']}. Cancelling...")
+            self.reconciler.cancel_orphan_orders(symbol=symbol, orphan_ids=recon["orphan_orders"])
 
-        if closed:
-            if side == "BUY":
-                pnl = (exit_price - entry_price) * quantity
-            else:
-                pnl = (entry_price - exit_price) * quantity
-
-            self.capital_manager.record_trade_result(pnl=pnl, fee=0.0)
-            del self.active_positions[symbol]
-
-            result = {
-                "symbol": symbol,
-                "status": "CLOSED",
-                "exit_reason": exit_reason,
-                "exit_price": exit_price,
-                "pnl": pnl
+        # Step 3: Execute trade if signal is present
+        if signal and signal.get("action") in ("BUY", "SELL"):
+            exec_res = self.engine.execute_order(
+                symbol=symbol,
+                side=signal["action"],
+                amount=signal.get("amount", 0.0),
+                price=signal.get("price", 0.0)
+            )
+            return {
+                "status": "executed",
+                "execution": exec_res,
+                "reconciliation": recon
             }
-            logger.info(f"Position closed: {result}")
-            return result
 
-        return {
-            "symbol": symbol,
-            "status": "OPEN",
-            "current_price": current_price
-        }
-
-    def open_paper_position(self, symbol: str, side: str, entry_price: float, quantity: float, stop_loss: float, take_profit: float):
-        self.active_positions[symbol] = {
-            "symbol": symbol,
-            "side": side,
-            "entry_price": entry_price,
-            "quantity": quantity,
-            "stop_loss": stop_loss,
-            "take_profit": take_profit
-        }
-        logger.info(f"Position opened: {self.active_positions[symbol]}")
+        return {"status": "idle", "reconciliation": recon}
