@@ -12,6 +12,11 @@ try:
 except Exception:
     WallexRiskGuard = None  # type: ignore
 
+try:
+    from src.exchange.wallex_live_guard import WallexLiveGuard
+except Exception:
+    WallexLiveGuard = None  # type: ignore
+
 
 class WallexOrderExecutor:
     """
@@ -22,6 +27,7 @@ class WallexOrderExecutor:
 
     VALID_SIDES = ("BUY", "SELL")
     VALID_TYPES = ("MARKET", "LIMIT")
+    MAX_SAFETY_NOTIONAL_TMN = 20_000_000.0
 
     def __init__(
         self,
@@ -29,12 +35,64 @@ class WallexOrderExecutor:
         dry_run: bool = True,
         min_notional_tmn: float = 100000.0,
         risk_guard: Optional[Any] = None,
+        api_key: Optional[str] = None,
+        api_secret: Optional[str] = None,
+        **kwargs
     ):
         self.client = client
         self.dry_run = dry_run
         self.min_notional_tmn = float(min_notional_tmn)
         self.risk_guard = risk_guard
+        self.api_key = api_key or ""
+        self.api_secret = api_secret or ""
+        self.live_guard = WallexLiveGuard(api_key=self.api_key, api_secret=self.api_secret) if WallexLiveGuard else None
 
+    # --- Stage 15 & 16 Contract ---
+    def place_limit_order(
+        self,
+        symbol: str,
+        side: str,
+        price: float,
+        quantity: float
+    ) -> Dict[str, Any]:
+        # Stage 16 Guard verification
+        if not self.dry_run and self.live_guard:
+            self.live_guard.verify_order_placement(dry_run=self.dry_run)
+
+        # Stage 15 validation
+        side_u = str(side).upper().strip()
+        if side_u not in self.VALID_SIDES:
+            return {"success": False, "reason": "INVALID_SIDE"}
+
+        try:
+            px = float(price)
+            qty = float(quantity)
+        except Exception:
+            return {"success": False, "reason": "INVALID_PARAMS"}
+
+        notional = px * qty
+        if notional < self.min_notional_tmn:
+            return {"success": False, "reason": "ORDER_BELOW_MIN_VALUE"}
+
+        if notional > self.MAX_SAFETY_NOTIONAL_TMN:
+            return {"success": False, "reason": "ORDER_EXCEEDS_SAFETY_LIMIT"}
+
+        if self.dry_run:
+            return {
+                "success": True,
+                "status": "SIMULATED_FILLED",
+                "mode": "DRY_RUN",
+                "order_id": f"DRY-{uuid.uuid4().hex[:12]}",
+                "symbol": symbol,
+                "side": side_u,
+                "price": px,
+                "quantity": qty,
+                "notional": notional
+            }
+
+        return self.submit_order(symbol=symbol, side=side_u, order_type="LIMIT", quantity=qty, price=px)
+
+    # --- Stage 23 & 25 Contract ---
     def validate_order(
         self,
         side: str,
@@ -80,7 +138,6 @@ class WallexOrderExecutor:
 
         notional = (px * qty) if px is not None else 0.0
 
-        # Min notional check applies only when notional is known (LIMIT)
         if type_u == "LIMIT" and notional < self.min_notional_tmn:
             return {
                 "ok": False,
@@ -151,13 +208,6 @@ class WallexOrderExecutor:
         capital_tmn: float,
         stop_loss_price: float,
     ) -> Dict[str, Any]:
-        """
-        Risk-gated wrapper for submit_order.
-        - Keeps Stage23 submit_order contract unchanged.
-        - Blocks orders when RiskGuard rejects them.
-        """
-
-        # Validate first (ensures price exists for LIMIT etc.)
         check = self.validate_order(side=side, order_type=order_type, quantity=quantity, price=price)
         if not check.get("ok"):
             return {"success": False, "stage": "validation", **check}
@@ -165,7 +215,6 @@ class WallexOrderExecutor:
         if self.risk_guard is None:
             return {"success": False, "stage": "risk", "reason": "NO_RISK_GUARD"}
 
-        # For MARKET we still need an entry price for risk calc
         entry_price = check["price"]
         if entry_price is None:
             return {"success": False, "stage": "risk", "reason": "MISSING_ENTRY_PRICE"}
@@ -186,7 +235,6 @@ class WallexOrderExecutor:
                 "details": verdict,
             }
 
-        # OK => submit
         out = self.submit_order(
             symbol=symbol,
             side=check["side"],
@@ -194,7 +242,6 @@ class WallexOrderExecutor:
             quantity=check["quantity"],
             price=check["price"],
         )
-        # Attach risk metadata (non-breaking)
         if isinstance(out, dict):
             out.setdefault("risk", verdict)
         return out
