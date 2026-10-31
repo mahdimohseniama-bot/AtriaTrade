@@ -15,12 +15,14 @@ class PaperTradingLiveRunner:
         symbol: str = "BTC/USDT",
         initial_balance: float = 10000.0,
         regime_filter: Optional[MarketRegimeFilter] = None,
-        portfolio_risk: Optional[PortfolioRiskManager] = None
+        portfolio_risk: Optional[PortfolioRiskManager] = None,
+        executor: Optional[Any] = None
     ):
         self.symbol = symbol
         self.balance = float(initial_balance)
         self.regime_filter = regime_filter or MarketRegimeFilter(fast_window=5, slow_window=15)
         self.portfolio_risk = portfolio_risk or PortfolioRiskManager(max_total_exposure_pct=0.5)
+        self.executor = executor
         
         self.candles: List[Dict[str, Any]] = []
         self.open_positions: Dict[str, Dict[str, Any]] = {}
