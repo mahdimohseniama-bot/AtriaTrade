@@ -6,13 +6,13 @@ class ExchangeFactory:
 
     @classmethod
     def register(cls, name: str, adapter_class: Type[BaseExchangeAdapter]) -> None:
-        """ثبت یک صرافی جدید در سیستم"""
+        """Register a new exchange adapter class."""
         cls._adapters[name.upper()] = adapter_class
 
     @classmethod
-    def create(cls, name: str, **kwargs) -> BaseExchangeAdapter:
-        """ساخت و بازگرداندن نمونه‌ای از صرافی مورد نظر"""
+    def create(cls, name: str, *args, **kwargs) -> BaseExchangeAdapter:
+        """Instantiate and return an exchange adapter."""
         name_upper = name.upper()
         if name_upper not in cls._adapters:
             raise ValueError(f"Exchange adapter '{name}' is not registered. Available: {list(cls._adapters.keys())}")
-        return cls._adapters[name_upper](**kwargs)
+        return cls._adapters[name_upper](*args, **kwargs)

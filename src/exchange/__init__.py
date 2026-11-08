@@ -1,13 +1,10 @@
-from .models import Ticker, OrderResponse
-from .base_exchange import BaseExchangeAdapter
-from .factory import ExchangeFactory
 from .adapters.dummy_exchange import DummyExchangeAdapter
 from .adapters.binance_testnet import BinanceTestnetAdapter
 from .adapters.nobitex import NobitexAdapter
+from .adapters.wallex import WallexAdapter
+from .factory import ExchangeFactory
 
-# ثبت آداپتورها در Factory
 ExchangeFactory.register("DUMMY", DummyExchangeAdapter)
 ExchangeFactory.register("BINANCE_TESTNET", BinanceTestnetAdapter)
 ExchangeFactory.register("NOBITEX", NobitexAdapter)
-
-__all__ = ["Ticker", "OrderResponse", "BaseExchangeAdapter", "ExchangeFactory"]
+ExchangeFactory.register("WALLEX", WallexAdapter)
