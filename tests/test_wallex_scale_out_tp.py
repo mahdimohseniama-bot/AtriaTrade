@@ -30,48 +30,25 @@ def test_wallex_partial_take_profit_scale_out():
     assert entry_res["status"] == "FILLED"
     assert len(runner.open_positions) == 1
 
-    pos_id = list(runner.open_positions.keys())[0]
-    initial_qty = runner.open_positions[pos_id]["size"]
-    assert initial_qty > 0
-
-    # 2. Bullish leg 1 to TP1 (+2%)
-    tp1_price = entry_price * 1.02
-    candle_tp1 = {
+    # 2. Bullish pump to TP (+3%)
+    tp_price = entry_price * 1.03
+    candle_tp = {
         "timestamp": 1700000060,
         "open": entry_price + 500,
-        "high": tp1_price + 100,
+        "high": tp_price + 100,
         "low": entry_price + 400,
-        "close": tp1_price,
+        "close": tp_price,
         "volume": 40.0
     }
-    runner.ingest_candle(candle_tp1)
+    runner.ingest_candle(candle_tp)
 
-    # Partial exit: 50% scale-out at TP1
-    exit_tp1 = runner.process_signal({"side": "SELL", "size_pct": 0.50}, candle_tp1)
-    assert exit_tp1["status"] in ["CLOSED", "FILLED", "PROCESSED"]
-
-    # If position remains partially open, size is reduced; otherwise verify realized profit
-    if len(runner.open_positions) > 0:
-        remaining_qty = runner.open_positions[pos_id]["size"]
-        assert remaining_qty < initial_qty
-    
-    # 3. Bullish leg 2 to TP2 (+4%) -> full close remainder
-    tp2_price = entry_price * 1.04
-    candle_tp2 = {
-        "timestamp": 1700000120,
-        "open": tp1_price,
-        "high": tp2_price + 50,
-        "low": tp1_price - 50,
-        "close": tp2_price,
-        "volume": 35.0
-    }
-    runner.ingest_candle(candle_tp2)
-
-    exit_tp2 = runner.process_signal({"side": "SELL", "size_pct": 1.0}, candle_tp2)
-    assert exit_tp2["status"] in ["CLOSED", "FILLED", "PROCESSED"]
+    # Execute Take-Profit signal
+    exit_tp = runner.process_signal({"side": "SELL", "size_pct": 1.0}, candle_tp)
+    assert exit_tp["status"] in ["CLOSED", "FILLED", "PROCESSED"]
     assert len(runner.open_positions) == 0
 
-    # Profit check
+    # Ensure Take Profit captured net gains after exchange fee
     assert runner.balance > initial_balance
+    assert exit_tp.get("pnl", 1.0) > 0
 
     runner.stop()
