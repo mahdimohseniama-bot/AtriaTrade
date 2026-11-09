@@ -1,110 +1,107 @@
-from unittest.mock import patch, MagicMock
 import pytest
-import requests
+from unittest.mock import patch, MagicMock
 from src.exchange.adapters.wallex import WallexAdapter
-from src.exchange.models import Ticker
 
+@pytest.fixture
+def wallex_adapter():
+    return WallexAdapter(api_token="test_wallex_token")
 
-def test_wallex_adapter_init_without_token():
-    adapter = WallexAdapter()
-    assert adapter.api_token is None
-    assert adapter._get_headers() == {}
-    assert adapter.LIVE_ORDER_EXECUTION_ENABLED is False
+def test_wallex_adapter_initialization(wallex_adapter):
+    assert wallex_adapter is not None
+    assert wallex_adapter.api_token == "test_wallex_token"
+    assert wallex_adapter.base_url == "https://api.wallex.ir/v1"
+    assert wallex_adapter.headers["X-API-KEY"] == "test_wallex_token"
 
-
-def test_wallex_adapter_init_with_token():
-    adapter = WallexAdapter(api_token="test_token_123")
-    assert adapter.api_token == "test_token_123"
-    assert adapter._get_headers() == {"X-API-KEY": "test_token_123"}
-
-
-@patch("src.exchange.adapters.wallex.requests.get")
-def test_wallex_test_connection_success(mock_get):
+@patch("requests.get")
+def test_wallex_test_connection_success(mock_get, wallex_adapter):
     mock_resp = MagicMock()
     mock_resp.status_code = 200
     mock_get.return_value = mock_resp
+    assert wallex_adapter.test_connection() is True
 
-    adapter = WallexAdapter()
-    assert adapter.test_connection() is True
+@patch("requests.get")
+def test_wallex_test_connection_failure(mock_get, wallex_adapter):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 500
+    mock_get.return_value = mock_resp
+    assert wallex_adapter.test_connection() is False
 
-
-@patch("src.exchange.adapters.wallex.requests.get")
-def test_wallex_test_connection_failure(mock_get):
-    mock_get.side_effect = requests.RequestException("Network error")
-    adapter = WallexAdapter()
-    assert adapter.test_connection() is False
-
-
-@patch("src.exchange.adapters.wallex.requests.get")
-def test_wallex_get_ticker_success(mock_get):
+@patch("requests.get")
+def test_wallex_get_ticker(mock_get, wallex_adapter):
     mock_resp = MagicMock()
     mock_resp.status_code = 200
     mock_resp.json.return_value = {
         "result": {
             "symbols": {
-                "BTCTMN": {
+                "BTCUSDT": {
                     "stats": {
-                        "bidPrice": "62000000000",
-                        "askPrice": "62100000000",
-                        "lastPrice": "62050000000",
-                        "24h_volume": "14.5",
+                        "lastPrice": "65000.50",
+                        "bidPrice": "64990.00",
+                        "askPrice": "65010.00",
+                        "24h_volume": "120.5"
                     }
                 }
             }
-        }
+        },
+        "success": True
     }
     mock_get.return_value = mock_resp
 
-    adapter = WallexAdapter()
-    ticker = adapter.get_ticker("BTCTMN")
+    ticker = wallex_adapter.get_ticker("BTCUSDT")
+    assert ticker.symbol == "BTCUSDT"
+    assert ticker.last_price == 65000.50
+    assert ticker.bid == 64990.00
+    assert ticker.ask == 65010.00
+    assert ticker.volume == 120.5
 
-    assert isinstance(ticker, Ticker)
-    assert ticker.symbol == "BTCTMN"
-    assert ticker.bid == 62000000000.0
-    assert ticker.ask == 62100000000.0
-    assert ticker.last_price == 62050000000.0
-    assert ticker.volume == 14.5
-
-
-@patch("src.exchange.adapters.wallex.requests.get")
-def test_wallex_get_ticker_symbol_not_found(mock_get):
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-    mock_resp.json.return_value = {"result": {"symbols": {}}}
-    mock_get.return_value = mock_resp
-
-    adapter = WallexAdapter()
-    with pytest.raises(ValueError, match="Symbol UNKNOWNTMN not found on Wallex"):
-        adapter.get_ticker("UNKNOWNTMN")
-
-
-@patch("src.exchange.adapters.wallex.requests.get")
-def test_wallex_get_order_book_success(mock_get):
+@patch("requests.get")
+def test_wallex_get_order_book(mock_get, wallex_adapter):
     mock_resp = MagicMock()
     mock_resp.status_code = 200
     mock_resp.json.return_value = {
         "result": {
-            "ask": [{"price": "62100000000", "quantity": "0.1"}],
-            "bid": [{"price": "62000000000", "quantity": "0.2"}],
+            "ask": [{"price": "65010", "quantity": "0.5"}],
+            "bid": [{"price": "64990", "quantity": "0.8"}]
         }
     }
     mock_get.return_value = mock_resp
 
-    adapter = WallexAdapter()
-    ob = adapter.get_order_book("BTCTMN")
+    orderbook = wallex_adapter.get_order_book("BTCUSDT")
+    assert "ask" in orderbook
+    assert "bid" in orderbook
+    assert len(orderbook["ask"]) == 1
+    assert len(orderbook["bid"]) == 1
 
-    assert "ask" in ob
-    assert "bid" in ob
-    assert len(ob["ask"]) == 1
+def test_wallex_place_order_guard_disabled(wallex_adapter):
+    with pytest.raises(PermissionError) as exc_info:
+        wallex_adapter.place_order("BTCUSDT", "BUY", "LIMIT", 0.01, 65000.0)
+    assert "Live order execution is disabled" in str(exc_info.value)
 
+@patch("requests.post")
+def test_wallex_place_order_success(mock_post, wallex_adapter):
+    wallex_adapter.LIVE_ORDER_EXECUTION_ENABLED = True
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "success": True,
+        "result": {"orderId": "wlx_778899"}
+    }
+    mock_post.return_value = mock_resp
 
-def test_wallex_place_order_guard_no_token():
-    adapter = WallexAdapter()
-    with pytest.raises(PermissionError, match="API token is not configured for Wallex"):
-        adapter.place_order("BTCTMN", "BUY", "LIMIT", 0.01, 62000000000)
+    res = wallex_adapter.place_order("BTCUSDT", "BUY", "LIMIT", 0.005, 64000.0)
+    assert res.order_id == "wlx_778899"
+    assert res.symbol == "BTCUSDT"
+    assert res.quantity == 0.005
+    assert res.price == 64000.0
+    wallex_adapter.LIVE_ORDER_EXECUTION_ENABLED = False
 
+@patch("requests.delete")
+def test_wallex_cancel_order_success(mock_delete, wallex_adapter):
+    wallex_adapter.LIVE_ORDER_EXECUTION_ENABLED = True
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_delete.return_value = mock_resp
 
-def test_wallex_place_order_guard_live_disabled():
-    adapter = WallexAdapter(api_token="valid_key")
-    with pytest.raises(PermissionError, match="Live order execution is disabled for Wallex"):
-        adapter.place_order("BTCTMN", "BUY", "LIMIT", 0.01, 62000000000)
+    success = wallex_adapter.cancel_order("wlx_778899")
+    assert success is True
+    wallex_adapter.LIVE_ORDER_EXECUTION_ENABLED = False

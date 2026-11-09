@@ -1,7 +1,7 @@
 import requests
 from typing import Optional, Dict, Any
 from src.exchange.base_exchange import BaseExchangeAdapter
-from src.exchange.models import Ticker, OrderResponse
+from src.exchange.models import Ticker, OrderResponse, OrderStatus
 
 class WallexAdapter(BaseExchangeAdapter):
     LIVE_ORDER_EXECUTION_ENABLED = False
@@ -62,4 +62,58 @@ class WallexAdapter(BaseExchangeAdapter):
             raise PermissionError("API token is not configured for Wallex.")
         if not self.LIVE_ORDER_EXECUTION_ENABLED:
             raise PermissionError("Live order execution is disabled for Wallex. Use paper trading mode.")
-        raise NotImplementedError("Wallex live trading is not enabled yet.")
+        
+        payload = {
+            "symbol": symbol,
+            "type": order_type.lower(),
+            "side": side.lower(),
+            "quantity": quantity,
+        }
+        if price > 0:
+            payload["price"] = price
+
+        try:
+            response = requests.post(
+                f"{self.base_url}/order",
+                headers=self.headers,
+                json=payload,
+                timeout=10
+            )
+            data = response.json()
+            if response.status_code not in (200, 201) or not data.get("success", True):
+                error_msg = data.get("message", response.text)
+                raise RuntimeError(f"Order placement failed on Wallex: {error_msg}")
+
+            result = data.get("result", {})
+            order_id = str(result.get("orderId", result.get("clientOrderId", "UNKNOWN")))
+            
+            status = getattr(OrderStatus, "OPEN", getattr(OrderStatus, "PENDING", "OPEN"))
+
+            return OrderResponse(
+                order_id=order_id,
+                symbol=symbol,
+                status=status,
+                price=price,
+                quantity=quantity,
+                filled_quantity=0.0,
+                raw_data=result
+            )
+        except requests.RequestException as e:
+            raise ConnectionError(f"Network error placing order on Wallex: {str(e)}")
+
+    def cancel_order(self, order_id: str) -> bool:
+        if not self.api_token:
+            raise PermissionError("API token is not configured for Wallex.")
+        if not self.LIVE_ORDER_EXECUTION_ENABLED:
+            raise PermissionError("Live order execution is disabled for Wallex.")
+
+        try:
+            response = requests.delete(
+                f"{self.base_url}/order",
+                headers=self.headers,
+                json={"orderId": order_id},
+                timeout=10
+            )
+            return response.status_code == 200
+        except requests.RequestException as e:
+            raise ConnectionError(f"Network error cancelling order on Wallex: {str(e)}")
