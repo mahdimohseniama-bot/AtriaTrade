@@ -1,44 +1,75 @@
-import os
 import sys
-import logging
+import time
+import argparse
+from pathlib import Path
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+# Auto-resolve project root to sys.path
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 from src.adapters.wallex_paper import WallexPaperAdapter
-from src.core.paper_live_runner import PaperTradingLiveRunner
+from src.core.risk_manager import RiskManager
+from src.core.monitoring import AtriaLogger
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-logger = logging.getLogger("WallexPaperLiveTest")
+logger = AtriaLogger(name="WallexPaperRunner").get_logger()
 
-def main():
-    logger.info("--- Starting Wallex Paper Live Runner Integration ---")
+def run_paper_session(duration_sec: int = 10, interval_sec: int = 2, symbol: str = "BTCUSDT"):
+    logger.info("Initializing Wallex Paper Trading Session...")
+    logger.info(f"Target Symbol: {symbol} | Duration: {duration_sec}s | Interval: {interval_sec}s")
     
-    adapter = WallexPaperAdapter(initial_usdt=100000.0, initial_btc=1.0)
-    runner = PaperTradingLiveRunner(symbol="BTC/USDT", initial_balance=100000.0)
-    runner.start()
+    adapter = WallexPaperAdapter(initial_balance=1000.0)
+    risk_manager = RiskManager(capital=1000.0, max_daily_loss_percent=3.0)
     
-    # Ingest multiple warm-up candles to establish market regime
-    prices = [78000.0, 78200.0, 78400.0, 78600.0, 78800.0, 79000.0]
-    for i, p in enumerate(prices):
-        candle = {"timestamp": 1761930000 + i*60, "open": p-100, "high": p+200, "low": p-200, "close": p, "volume": 10.0}
-        ingest_res = runner.ingest_candle(candle)
-        logger.info(f"Warm-up Candle {i+1} Result: {ingest_res}")
+    start_time = time.time()
+    cycle = 1
+    order_executed = False
+
+    logger.info("Wallex Paper Runner started successfully. Monitoring market feed...")
     
-    # Process a BUY signal with the latest candle
-    latest_candle = {"timestamp": 1761930360, "open": 79000.0, "high": 79500.0, "low": 78900.0, "close": 79200.0, "volume": 15.0}
-    runner.ingest_candle(latest_candle)
-    
-    signal = {"side": "BUY", "size_pct": 0.05}
-    signal_res = runner.process_signal(signal, latest_candle)
-    logger.info(f"Signal Process Result: {signal_res}")
-    
-    # Check balances correctly specifying asset
-    usdt_bal = adapter.get_balance("USDT")
-    btc_bal = adapter.get_balance("BTC")
-    logger.info(f"Adapter Balances -> USDT: {usdt_bal}, BTC: {btc_bal}")
-    
-    runner.stop()
-    logger.info("[SUCCESS] Wallex Paper Live Runner integration verified successfully!")
+    while time.time() - start_time < duration_sec:
+        ticker = adapter.get_ticker(symbol)
+        price = ticker.get("last_price", 0.0)
+        
+        if price <= 0.0:
+            logger.warning(f"Iteration {cycle}: Invalid market price received ({price}). Retrying...")
+            time.sleep(interval_sec)
+            cycle += 1
+            continue
+            
+        can_trade = risk_manager.can_trade_today()
+        logger.info(f"[Cycle {cycle:03d}] Symbol: {symbol} | Price: {price:,.2f} | Can Trade: {can_trade}")
+        
+        # Place a single simulated paper trade on cycle 2 if allowed
+        if cycle == 2 and can_trade and not order_executed:
+            order_qty = 0.001
+            sl_price = price * 0.98
+            logger.info(f"Simulating PAPER BUY: Qty={order_qty}, Price={price:,.2f}, SL={sl_price:,.2f}")
+            order = adapter.create_order(
+                symbol=symbol,
+                side="BUY",
+                order_type="LIMIT",
+                quantity=order_qty,
+                price=price
+            )
+            logger.info(f"Paper Order Executed: {order}")
+            order_executed = True
+            
+        time.sleep(interval_sec)
+        cycle += 1
+
+    logger.info("=" * 50)
+    logger.info("SESSION COMPLETED SUCCESSFULLY")
+    logger.info(f"Cycles Executed: {cycle - 1}")
+    logger.info(f"Daily Loss Recorded: {risk_manager.get_today_loss():.2f}")
+    logger.info(f"Trading Allowed Status: {risk_manager.can_trade_today()}")
+    logger.info("=" * 50)
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Run Wallex Paper Live Session")
+    parser.add_argument("--duration", type=int, default=6, help="Session duration in seconds")
+    parser.add_argument("--interval", type=int, default=2, help="Poll interval in seconds")
+    parser.add_argument("--symbol", type=str, default="BTCUSDT", help="Trading symbol")
+    args = parser.parse_args()
+    
+    run_paper_session(duration_sec=args.duration, interval_sec=args.interval, symbol=args.symbol)

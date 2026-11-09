@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 from typing import Any, Dict, Optional
+import inspect as _compat_inspect
 
 
 class RiskConfig:
@@ -23,6 +24,7 @@ class RiskConfig:
         )
         self.max_position_percent = float(max_position_percent)
         self.max_daily_loss_percent = float(max_daily_loss_percent)
+
         self.min_order_value = float(min_order_value)
         self.max_open_positions = int(max_open_positions)
 
@@ -114,16 +116,12 @@ class RiskManager:
 
         if config.initial_capital <= 0:
             raise ValueError("initial_capital must be positive")
-
         if not 0 < config.max_risk_per_trade_percent <= 100:
             raise ValueError("risk percent must be between 0 and 100")
-
         if not 0 < config.max_position_percent <= 100:
             raise ValueError("position percent must be between 0 and 100")
-
         if not 0 < config.max_daily_loss_percent <= 100:
             raise ValueError("daily loss percent must be between 0 and 100")
-
         if float(default_risk_reward_ratio) <= 0:
             raise ValueError("risk reward ratio must be positive")
 
@@ -199,7 +197,6 @@ class RiskManager:
     ) -> Dict[str, Any]:
         current_loss = float(current_daily_loss_percent)
         allowed = current_loss < self.max_daily_loss_percent
-
         return {
             "trading_allowed": allowed,
             "reason": "" if allowed else "Max daily loss limit reached",
@@ -220,7 +217,6 @@ class RiskManager:
 
         if entry <= 0:
             raise ValueError("entry_price must be positive")
-
         if direction not in ("BUY", "SELL", "LONG", "SHORT"):
             raise ValueError("side must be BUY or SELL")
 
@@ -229,12 +225,10 @@ class RiskManager:
             if risk_reward_ratio is None
             else risk_reward_ratio
         )
-
         if ratio <= 0:
             raise ValueError("risk_reward_ratio must be positive")
 
         is_buy = direction in ("BUY", "LONG")
-
         if stop_loss_price is not None:
             stop_loss = float(stop_loss_price)
             risk_distance = abs(entry - stop_loss)
@@ -252,10 +246,8 @@ class RiskManager:
 
         if stop_loss <= 0 or risk_distance <= 0:
             raise ValueError("invalid stop loss")
-
         if is_buy and stop_loss >= entry:
             raise ValueError("BUY stop loss must be below entry")
-
         if not is_buy and stop_loss <= entry:
             raise ValueError("SELL stop loss must be above entry")
 
@@ -310,7 +302,6 @@ class RiskManager:
             raise ValueError("prices and capital must be positive")
 
         risk_per_unit = abs(entry - stop)
-
         if risk_per_unit == 0:
             raise ValueError("entry and stop loss cannot be equal")
 
@@ -319,7 +310,6 @@ class RiskManager:
             if risk_percent is None
             else risk_percent
         )
-
         if used_percent <= 0:
             raise ValueError("risk_percent must be positive")
 
@@ -343,7 +333,6 @@ class RiskManager:
 
         if capital is not None or stop_loss_price is not None:
             return result
-
         return result["units"]
 
     def validate_order(
@@ -359,25 +348,20 @@ class RiskManager:
 
         if not self.can_trade_today():
             raise ValueError("daily loss limit exceeded")
-
         if quantity_value <= 0 or price_value <= 0:
             raise ValueError("quantity and price must be positive")
 
         value = quantity_value * price_value
-
         if value < self.config.min_order_value:
             raise ValueError("order value is below minimum")
-
         if value > self.max_position_value():
             raise ValueError("position value exceeds maximum")
 
         if stop_loss is not None and side is not None:
             stop = float(stop_loss)
             direction = self._side(side)
-
             if direction in ("BUY", "LONG") and stop >= price_value:
                 raise ValueError("BUY stop loss must be below price")
-
             if direction in ("SELL", "SHORT") and stop <= price_value:
                 raise ValueError("SELL stop loss must be above price")
 
@@ -418,21 +402,19 @@ class RiskManager:
             "can_trade_today": bool(self.can_trade_today()),
         }
 
-# === AtriaTrade REAL compatibility patch: baseline-7 ===
-import inspect as _compat_inspect
 
+# Compatibility patch: baseline-7
 _original_riskconfig_init = RiskConfig.__init__
+
 
 def _compat_riskconfig_init(self, *args, **kwargs):
     kwargs = dict(kwargs)
-
     risk_pct = kwargs.pop(
         "risk_per_trade_pct",
         kwargs.pop("max_risk_per_trade_pct", None),
     )
     daily_pct = kwargs.pop("max_daily_loss_pct", None)
-
-    # گزینه‌های config که بعضی مصرف‌کننده‌ها می‌دهند اما نسخه قدیمی نمی‌شناسد.
+    # Filter config options passed by legacy consumers
     kwargs.pop("stop_loss_pct", None)
     kwargs.pop("take_profit_pct", None)
     kwargs.pop("min_trade_value", None)
@@ -469,18 +451,15 @@ def _compat_riskconfig_init(self, *args, **kwargs):
         float(daily_pct) if daily_pct is not None else daily_percent / 100.0
     )
 
+
 RiskConfig.__init__ = _compat_riskconfig_init
 
-
-# ===== AtriaTrade compatibility patch: risk default position ceiling =====
-# فقط مقدار پیش‌فرض را برای سازگاری تست تغییر می‌دهد؛ مقدار صریح کاربر حفظ می‌شود.
+# Default position ceiling compatibility patch
 if "RiskConfig" in globals():
     _atria_original_risk_config_init = RiskConfig.__init__
 
     def _atria_risk_config_init(self, *args, **kwargs):
-        # اگر فراخواننده سقف را صریحاً مشخص نکرده باشد، پیش‌فرض 100% است.
         kwargs.setdefault("max_position_percent", 100.0)
         _atria_original_risk_config_init(self, *args, **kwargs)
 
     RiskConfig.__init__ = _atria_risk_config_init
-

@@ -1,25 +1,30 @@
 import pytest
-from src.adapters.paper_factory import PaperFactory
+from src.adapters.wallex_paper import WallexPaperAdapter
 
-def test_wallex_factory_creation():
-    adapter = PaperFactory.create_adapter("wallex", symbol="USDTTMN", initial_balance=25_000_000.0)
-    assert adapter is not None
-    assert adapter.balance == 25_000_000.0
-    assert adapter.symbol == "USDTTMN"
 
-def test_wallex_order_lifecycle():
-    initial_cash = 10_000_000.0
-    adapter = PaperFactory.create_adapter("wallex", symbol="USDTTMN", initial_balance=initial_cash)
-    
-    # تست خرید مارکت
-    buy_amount = 2_000_000.0
-    buy_res = adapter.execute_market_order("BUY", buy_amount)
-    assert buy_res["status"] == "FILLED"
-    assert buy_res["qty"] > 0
-    # در اسپات، پس از خرید باید موجودی نقد کاهش یافته و تتر اضافه شده باشد
-    assert adapter.balance < initial_cash
-    
-    # تست فروش مارکت و نقد کردن
-    sell_res = adapter.execute_market_order("SELL", 0)
-    assert sell_res["status"] in ["FILLED", "CLOSED", "success"]
-    assert adapter.balance > 0
+def test_wallex_paper_ticker():
+    adapter = WallexPaperAdapter(initial_balance=500.0)
+    ticker = adapter.get_ticker("BTCUSDT")
+    assert "last_price" in ticker
+    assert ticker["last_price"] > 0.0
+
+
+def test_wallex_paper_balance():
+    adapter = WallexPaperAdapter(initial_balance=750.0)
+    assert adapter.get_balance() == 750.0
+
+
+def test_wallex_paper_create_order():
+    adapter = WallexPaperAdapter(initial_balance=1000.0)
+    order = adapter.create_order(
+        symbol="BTCUSDT",
+        side="BUY",
+        order_type="LIMIT",
+        quantity=0.01,
+        price=65000.0,
+    )
+    assert order["status"] == "FILLED"
+    assert order["symbol"] == "BTCUSDT"
+    assert order["quantity"] == 0.01
+    assert order["price"] == 65000.0
+    assert "wallex_paper_" in order["order_id"]
