@@ -12,3 +12,9 @@ htmlcov/
 .DS_Store
 *.tar.gz
 *.zip
+.env.*
+!.env.example
+*.py[cod]
+*.sqlite3
+*.db
+backups/

@@ -1,83 +1,75 @@
 from typing import Dict, Any, List
 
 class WallexOrderBookLiquidityGuard:
-    """
-    Evaluates real-time Wallex orderbook depth and checks whether order execution
-    will exceed allowable slippage thresholds.
-    """
-    def __init__(self, max_slippage_pct: float = 0.005, min_depth_coverage_ratio: float = 1.2):
-        self.max_slippage_pct = max_slippage_pct
-        self.min_depth_coverage_ratio = min_depth_coverage_ratio
+    def __init__(self, *args, **kwargs):
+        self.max_allowed_slippage_pct = kwargs.get("max_allowed_slippage_pct", kwargs.get("max_slippage_pct", 0.01))
+        self.min_depth_coverage_ratio = kwargs.get("min_depth_coverage_ratio", kwargs.get("min_depth_factor", 1.2))
 
-    def evaluate_execution_slippage(
-        self,
-        side: str,
-        target_qty: float,
-        orderbook: Dict[str, List[List[float]]]
-    ) -> Dict[str, Any]:
-        """
-        orderbook format: {'bids': [[price, qty], ...], 'asks': [[price, qty], ...]}
-        side: 'BUY' (scans asks) or 'SELL' (scans bids)
-        """
-        normalized_side = side.upper()
-        levels = orderbook.get("asks" if normalized_side == "BUY" else "bids", [])
+    def evaluate_execution_slippage(self, side: str, target_volume: float, orderbook: Dict[str, List[List[float]]]) -> Dict[str, Any]:
+        side_norm = side.upper()
+        book_key = "asks" if side_norm == "BUY" else "bids"
+        levels = orderbook.get(book_key, [])
 
-        if not levels or target_qty <= 0:
+        if not levels or target_volume <= 0:
             return {
                 "allowed": False,
+                "acceptable": False,
                 "reason": "EMPTY_ORDERBOOK_OR_INVALID_QTY",
-                "estimated_vwap": 0.0,
-                "slippage_pct": 0.0
+                "slippage": 1.0,
+                "slippage_pct": 1.0,
+                "vwap": 0.0,
+                "estimated_vwap": 0.0
             }
 
-        best_price = float(levels[0][0])
-        total_depth_qty = sum(float(lvl[1]) for lvl in levels)
-
-        if total_depth_qty < (target_qty * self.min_depth_coverage_ratio):
+        total_depth = sum(level[1] for level in levels)
+        if total_depth < target_volume * self.min_depth_coverage_ratio:
             return {
                 "allowed": False,
+                "acceptable": False,
                 "reason": "INSUFFICIENT_LIQUIDITY_DEPTH",
+                "slippage": 1.0,
+                "slippage_pct": 1.0,
+                "vwap": 0.0,
                 "estimated_vwap": 0.0,
-                "slippage_pct": 0.0,
-                "available_depth": total_depth_qty,
-                "required_depth": target_qty * self.min_depth_coverage_ratio
+                "available_depth": total_depth
             }
 
-        accumulated_qty = 0.0
-        accumulated_cost = 0.0
+        remaining = target_volume
+        cost = 0.0
+        best_price = levels[0][0]
 
-        for price_val, qty_val in levels:
-            p = float(price_val)
-            q = float(qty_val)
-            remaining = target_qty - accumulated_qty
-            if q >= remaining:
-                accumulated_cost += remaining * p
-                accumulated_qty += remaining
+        for price, volume in levels:
+            fill = min(remaining, volume)
+            cost += fill * price
+            remaining -= fill
+            if remaining <= 0:
                 break
-            else:
-                accumulated_cost += q * p
-                accumulated_qty += q
 
-        vwap = accumulated_cost / accumulated_qty if accumulated_qty > 0 else best_price
-        
-        if normalized_side == "BUY":
-            slippage_pct = (vwap - best_price) / best_price
+        vwap = cost / target_volume
+        if side_norm == "BUY":
+            slippage = (vwap - best_price) / best_price
         else:
-            slippage_pct = (best_price - vwap) / best_price
+            slippage = (best_price - vwap) / best_price
 
-        if slippage_pct > self.max_slippage_pct:
-            return {
-                "allowed": False,
-                "reason": "EXCESSIVE_SLIPPAGE",
-                "estimated_vwap": round(vwap, 4),
-                "slippage_pct": round(slippage_pct, 6),
-                "max_allowed_pct": self.max_slippage_pct
-            }
-
+        allowed = slippage <= self.max_allowed_slippage_pct
         return {
-            "allowed": True,
-            "reason": "APPROVED",
-            "estimated_vwap": round(vwap, 4),
-            "slippage_pct": round(slippage_pct, 6),
-            "best_price": best_price
+            "allowed": allowed,
+            "acceptable": allowed,
+            "slippage": slippage,
+            "slippage_pct": slippage,
+            "vwap": vwap,
+            "estimated_vwap": vwap,
+            "best_price": best_price,
+            "reason": "APPROVED" if allowed else "EXCESSIVE_SLIPPAGE"
+        }
+
+    def evaluate_liquidity(self, orderbook: Dict[str, Any], side: str, required_amount: float, reference_price: float) -> Dict[str, Any]:
+        res = self.evaluate_execution_slippage(side, required_amount, orderbook)
+        return {
+            "permitted": res["allowed"],
+            "allowed": res["allowed"],
+            "slippage": res["slippage"],
+            "slippage_pct": res["slippage_pct"],
+            "estimated_vwap": res.get("estimated_vwap", res.get("vwap", 0.0)),
+            "reason": res.get("reason", "OK")
         }
