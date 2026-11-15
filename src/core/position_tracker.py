@@ -107,7 +107,7 @@ class PositionTracker:
                 pos.update_price(price_map[pos.symbol])
 
     def get_open_positions(self) -> List[Dict[str, Any]]:
-        return [p.to_dict() for p in self.positions.values()]
+        return list(self.positions.values())
 
     def get_total_unrealized_pnl(self) -> float:
         return sum(p.unrealized_pnl for p in self.positions.values())
