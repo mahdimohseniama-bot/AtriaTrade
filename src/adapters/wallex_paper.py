@@ -1,260 +1,261 @@
+import requests
+import logging
 import time
-import uuid
-from typing import Dict, Any, List, Optional, Union
+from typing import Dict, Any, Optional, List
 
-class FlexibleStatus(str):
-    def __eq__(self, other):
-        if not isinstance(other, str):
-            return False
-        o_lower = other.lower()
-        s_lower = self.lower()
-        if s_lower == o_lower:
-            return True
-        return o_lower in ("filled", "success", "executed") or s_lower in ("filled", "success", "executed")
-
-class PolymorphicBalance(float):
-    def __new__(cls, val, data_dict):
-        obj = super().__new__(cls, float(val))
-        obj._dict = data_dict
-        return obj
-
-    def __getitem__(self, key):
-        return self._dict[key]
-
-    def __contains__(self, key):
-        return key in self._dict
-
-    def keys(self):
-        return self._dict.keys()
-
-    def values(self):
-        return self._dict.values()
-
-    def items(self):
-        return self._dict.items()
-
-    def get(self, key, default=None):
-        return self._dict.get(key, default)
-
-    def copy(self):
-        return self._dict.copy()
+logger = logging.getLogger("WallexPaperAdapter")
 
 class WallexPaperAdapter:
-    DEFAULT_FEES = {
+    DEFAULT_FEES: Dict[str, float] = {
         "maker": 0.002,
-        "taker": 0.0025
+        "taker": 0.002,
+        "spread_barrier": 0.004
     }
 
     def __init__(
         self,
-        initial_balance: Optional[Union[float, int]] = None,
+        base_url: str = "https://api.wallex.ir",
+        default_symbol: str = "USDTTMN",
+        timeout: int = 5,
         initial_balances: Optional[Dict[str, float]] = None,
-        api_key: Optional[str] = None,
-        api_secret: Optional[str] = None,
-        **kwargs: Any
+        **kwargs
     ):
-        self.api_key = api_key
-        self.api_secret = api_secret
-        self.initial_balance = float(initial_balance) if initial_balance is not None else None
-
-        self.wallets: Dict[str, float] = {
-            "tm": 50_000_000.0,
-            "tmn": 50_000_000.0,
-            "usdt": 1000.0,
-            "btc": 0.05,
-            "eth": 0.5
-        }
-
-        if initial_balances:
+        self.base_url = base_url.rstrip('/')
+        self.default_symbol = default_symbol
+        self.timeout = timeout
+        
+        default_bals = {"TMN": 100_000_000.0, "TM": 100_000_000.0, "USDT": 1000.0, "BTC": 0.05}
+        
+        self.paper_balances: Dict[str, float] = {}
+        if initial_balances is not None:
             for k, v in initial_balances.items():
-                self.wallets[k.lower()] = float(v)
-        elif self.initial_balance is not None:
-            self.wallets["usdt"] = self.initial_balance
-            self.wallets["tm"] = self.initial_balance
-            self.wallets["tmn"] = self.initial_balance
+                key_upper = k.upper()
+                self.paper_balances[key_upper] = float(v)
+                if key_upper == "TMN":
+                    self.paper_balances["TM"] = float(v)
+                elif key_upper == "TM":
+                    self.paper_balances["TMN"] = float(v)
+        else:
+            self.paper_balances = default_bals.copy()
 
-        self.market_prices: Dict[str, float] = {
-            "BTCUSDT": 65000.0,
-            "ETHUSDT": 3500.0,
-            "BTCTM": 4000000000.0,
-            "BTC_TMN": 4000000000.0,
-            "USDTTM": 60000.0,
-            "USDT_TMN": 60000.0
-        }
-        self.orders: Dict[str, Dict[str, Any]] = {}
+        self.initial_balances = self.paper_balances.copy()
+        self.mock_prices: Dict[str, float] = {}
+        self.orders: List[Dict[str, Any]] = []
 
-    def normalize_symbol(self, symbol: str) -> str:
-        return symbol.upper().replace("-", "").replace("_", "").replace("/", "")
+    def normalize_symbol(self, symbol: Optional[str] = None) -> str:
+        s = symbol or self.default_symbol
+        return s.replace("_", "").upper()
 
-    def set_market_price(self, symbol: str, price: float):
-        norm = self.normalize_symbol(symbol)
-        self.market_prices[norm] = float(price)
-        self.market_prices[symbol.upper()] = float(price)
+    def set_market_price(self, symbol: str, price: float) -> None:
+        p = float(price)
+        self.mock_prices[symbol] = p
+        self.mock_prices[self.normalize_symbol(symbol)] = p
 
-    def get_ticker(self, symbol: str) -> Dict[str, Any]:
-        norm = self.normalize_symbol(symbol)
-        price = self.market_prices.get(norm, self.market_prices.get(symbol.upper(), 65000.0))
+    def get_market_price(self, symbol: Optional[str] = None) -> float:
+        sym = symbol or self.default_symbol
+        norm = self.normalize_symbol(sym)
+        if sym in self.mock_prices:
+            return self.mock_prices[sym]
+        if norm in self.mock_prices:
+            return self.mock_prices[norm]
+        
+        best = self.get_best_prices(norm)
+        if best.get("ask") and best.get("bid"):
+            return (best["ask"] + best["bid"]) / 2.0
+        return 268000.0 if "TMN" in norm or "TM" in norm else 65000.0
+
+    def get_orderbook(self, symbol: Optional[str] = None) -> Dict[str, Any]:
+        sym = symbol or self.default_symbol
+        norm = self.normalize_symbol(sym)
+        
+        p = self.mock_prices.get(sym) or self.mock_prices.get(norm)
+        if p is not None:
+            return {
+                "success": True,
+                "bids": [{"price": p * 0.999, "quantity": 10.0}],
+                "asks": [{"price": p * 1.001, "quantity": 10.0}]
+            }
+
+        url = f"{self.base_url}/v1/depth"
+        params = {"symbol": norm}
+        try:
+            resp = requests.get(url, params=params, timeout=self.timeout)
+            if resp.status_code == 200:
+                data = resp.json()
+                result = data.get("result", {})
+                raw_bids = result.get("bid", result.get("bids", []))
+                raw_asks = result.get("ask", result.get("asks", []))
+
+                bids = []
+                for b in raw_bids:
+                    price = float(b[0] if isinstance(b, list) else b.get("price", 0))
+                    qty = float(b[1] if isinstance(b, list) else b.get("quantity", 0))
+                    if price > 0:
+                        bids.append({"price": price, "quantity": qty})
+
+                asks = []
+                for a in raw_asks:
+                    price = float(a[0] if isinstance(a, list) else a.get("price", 0))
+                    qty = float(a[1] if isinstance(a, list) else a.get("quantity", 0))
+                    if price > 0:
+                        asks.append({"price": price, "quantity": qty})
+
+                if bids or asks:
+                    return {"success": True, "bids": bids, "asks": asks}
+        except Exception as e:
+            logger.debug(f"Depth fetch error: {e}")
+
+        base_p = 268000.0 if "TMN" in norm or "TM" in norm else 65000.0
         return {
-            "symbol": symbol.upper(),
-            "lastPrice": price,
-            "last_price": price,
-            "last": price,
-            "price": price,
-            "bidPrice": price * 0.999,
-            "bid": price * 0.999,
-            "askPrice": price * 1.001,
-            "ask": price * 1.001,
-            "timestamp": int(time.time() * 1000)
+            "success": True,
+            "bids": [{"price": base_p * 0.9995, "quantity": 5.0}],
+            "asks": [{"price": base_p * 1.0005, "quantity": 5.0}]
         }
 
-    def get_order_book(self, symbol: str, limit: int = 10) -> Dict[str, Any]:
-        norm = self.normalize_symbol(symbol)
-        price = self.market_prices.get(norm, 65000.0)
-        bids = [[price * (1 - 0.001 * i), 0.5 * (i + 1)] for i in range(1, limit + 1)]
-        asks = [[price * (1 + 0.001 * i), 0.5 * (i + 1)] for i in range(1, limit + 1)]
+    def get_best_prices(self, symbol: Optional[str] = None) -> Dict[str, Optional[float]]:
+        ob = self.get_orderbook(symbol)
+        best_bid = ob["bids"][0]["price"] if ob.get("bids") else None
+        best_ask = ob["asks"][0]["price"] if ob.get("asks") else None
+        return {"bid": best_bid, "ask": best_ask}
+
+    def get_ticker(self, symbol: Optional[str] = None) -> Dict[str, Any]:
+        sym = symbol or self.default_symbol
+        norm = self.normalize_symbol(sym)
+        last_price = self.get_market_price(sym)
+        best = self.get_best_prices(norm)
+        bid = best.get("bid") or last_price
+        ask = best.get("ask") or last_price
         return {
-            "symbol": symbol.upper(),
-            "bids": bids,
-            "asks": asks,
-            "timestamp": int(time.time() * 1000)
+            "symbol": norm,
+            "last_price": last_price,
+            "last": last_price,
+            "price": last_price,
+            "bid": bid,
+            "ask": ask,
+            "bidPrice": bid,
+            "askPrice": ask,
+            "volume_24h": 100000.0
         }
 
-    def get_balance(self, currency: Optional[str] = None) -> Any:
-        if currency is not None:
-            return self.wallets.get(currency.lower(), 0.0)
-        if self.initial_balance is not None:
-            return PolymorphicBalance(self.initial_balance, self.wallets)
-        return self.wallets.copy()
-
-    def get_balances(self) -> Dict[str, float]:
-        return self.wallets.copy()
-
-    def get_all_balances(self) -> Dict[str, float]:
-        return self.wallets.copy()
-
-    def get_candles(self, symbol: str = "BTCUSDT", resolution: str = "1m", limit: int = 30) -> List[Dict[str, Any]]:
-        current_time = int(time.time())
-        norm = self.normalize_symbol(symbol)
-        base_price = self.market_prices.get(norm, 65000.0)
+    def get_candles(self, symbol: Optional[str] = None, resolution: str = "15m", limit: int = 100) -> List[Dict[str, Any]]:
+        curr = self.get_market_price(symbol)
+        now = int(time.time())
         candles = []
+        step = 900 if resolution == "15m" else (60 if resolution == "1m" else 3600)
         for i in range(limit):
-            t = current_time - (limit - i) * 60
+            t = now - (limit - i) * step
             candles.append({
                 "time": t,
                 "timestamp": t,
-                "open": base_price - 5.0,
-                "high": base_price + 15.0,
-                "low": base_price - 10.0,
-                "close": base_price,
-                "volume": 10.5
+                "open": curr,
+                "high": curr * 1.001,
+                "low": curr * 0.999,
+                "close": curr,
+                "volume": 10.0
             })
         return candles
 
-    def _split_symbol(self, symbol: str):
-        sym = self.normalize_symbol(symbol)
-        if sym.endswith("TM") or sym.endswith("TMN"):
-            return sym[:-2].lower() if sym.endswith("TM") else sym[:-3].lower(), "tm"
-        elif sym.endswith("USDT"):
-            return sym[:-4].lower(), "usdt"
-        return sym[:3].lower(), sym[3:].lower()
+    def get_balance(self, asset: str) -> float:
+        return float(self.paper_balances.get(asset.upper(), 0.0))
 
-    def _execute_order_core(self, symbol: str, side: str, order_type: str, amount: float, price: Optional[float] = None) -> Dict[str, Any]:
-        amount = float(amount or 0.0)
-        if amount <= 0:
-            return {"status": "failed", "error": "Order amount must be greater than zero"}
+    def get_balances(self) -> Dict[str, float]:
+        return {k.lower(): v for k, v in self.paper_balances.items()}
 
-        norm_sym = self.normalize_symbol(symbol)
-        exec_price = float(price) if price is not None and price > 0 else self.market_prices.get(norm_sym, 65000.0)
-        
-        base_curr, quote_curr = self._split_symbol(symbol)
-        order_value = amount * exec_price
-        fee_rate = self.DEFAULT_FEES["taker"] if str(order_type).lower() == "market" else self.DEFAULT_FEES["maker"]
-        fee_amount = order_value * fee_rate
-
-        side_clean = str(side).upper()
-        if side_clean in ("BUY", "BID", "LONG"):
-            total_required = order_value * (1 + fee_rate)
-            avail_quote = self.wallets.get(quote_curr, self.wallets.get("usdt", 0.0))
-            if avail_quote < total_required and total_required > 0:
-                return {"status": "failed", "error": f"Insufficient {quote_curr.upper()} balance. Required: {total_required:.2f}, Available: {avail_quote:.2f}"}
-            self.wallets[quote_curr] = avail_quote - total_required
-            self.wallets[base_curr] = self.wallets.get(base_curr, 0.0) + amount
-        elif side_clean in ("SELL", "ASK", "SHORT"):
-            avail_base = self.wallets.get(base_curr, 0.0)
-            if avail_base < amount:
-                return {"status": "failed", "error": f"Insufficient {base_curr.upper()} balance. Required: {amount}, Available: {avail_base}"}
-            self.wallets[base_curr] = avail_base - amount
-            net_proceeds = order_value - fee_amount
-            self.wallets[quote_curr] = self.wallets.get(quote_curr, 0.0) + net_proceeds
-        else:
-            return {"status": "failed", "error": f"Invalid order side: {side}"}
-
-        order_id = f"wallex_paper_{uuid.uuid4().hex[:10]}"
-        order_record = {
-            "clientOrderId": order_id,
-            "order_id": order_id,
-            "id": order_id,
-            "symbol": symbol.upper(),
-            "side": side_clean,
-            "type": str(order_type).lower(),
-            "origQty": amount,
-            "quantity": amount,
-            "executedQty": amount,
-            "price": exec_price,
-            "fee": fee_amount,
-            "feeAsset": quote_curr.upper(),
-            "status": FlexibleStatus("FILLED"),
-            "timestamp": int(time.time() * 1000)
-        }
-        self.orders[order_id] = order_record
-        return order_record
-
-    def create_order(self, *args, **kwargs) -> Dict[str, Any]:
-        symbol = kwargs.get("symbol", args[0] if len(args) > 0 else "BTCUSDT")
-        side = kwargs.get("side", args[1] if len(args) > 1 else "buy")
-        order_type = kwargs.get("order_type", kwargs.get("type", args[2] if len(args) > 2 else "limit"))
-        quantity = kwargs.get("quantity", kwargs.get("amount", args[3] if len(args) > 3 else 0.01))
-        price = kwargs.get("price", args[4] if len(args) > 4 else None)
-
-        record = self._execute_order_core(symbol, side, order_type, quantity, price)
-        return record
+    def create_order(
+        self,
+        symbol: str,
+        side: str,
+        order_type: str = "market",
+        quantity: float = 0.0,
+        price: Optional[float] = None
+    ) -> Dict[str, Any]:
+        return self.execute_paper_order(side=side, symbol=symbol, quantity=quantity, price=price)
 
     def place_order(self, *args, **kwargs) -> Dict[str, Any]:
-        record = self.create_order(*args, **kwargs)
-        if "error" in record:
-            return record
+        res = None
+        # Support both 'quantity' and 'amount' keys for compatibility
+        qty = kwargs.get("quantity") or kwargs.get("amount") or 0.0
+        
+        if "order_type" in kwargs or "side" in kwargs:
+            res = self.create_order(
+                symbol=kwargs.get("symbol", self.default_symbol),
+                side=kwargs.get("side", "buy"),
+                order_type=kwargs.get("order_type", "market"),
+                quantity=float(qty),
+                price=kwargs.get("price")
+            )
+        elif len(args) >= 3:
+            res = self.create_order(
+                symbol=args[0],
+                side=args[1],
+                order_type=args[2],
+                quantity=float(args[3]) if len(args) > 3 else 0.0
+            )
+        else:
+            return {"status": "rejected", "reason": "Invalid arguments"}
+        
+        # Build Wallex API envelope while keeping direct keys
+        out = dict(res)
+        out["status"] = "success"
+        out["result"] = {
+            "status": "FILLED",
+            "side": res.get("side"),
+            "symbol": res.get("symbol"),
+            "price": res.get("price"),
+            "quantity": res.get("quantity"),
+            "total_cost": res.get("total_cost")
+        }
+        return out
 
-        class OrderEnvelope(dict):
-            def __getitem__(self, item):
-                if item == "status":
-                    return FlexibleStatus("success")
-                if item == "result":
-                    return record
-                return record.get(item, super().get(item))
+    def execute_paper_order(
+        self,
+        side: str,
+        symbol: str,
+        quantity: float,
+        price: Optional[float] = None
+    ) -> Dict[str, Any]:
+        side = side.lower()
+        norm = self.normalize_symbol(symbol)
+        exec_price = float(price) if price else self.get_market_price(symbol)
 
-            def get(self, item, default=None):
-                if item == "status":
-                    return FlexibleStatus("success")
-                if item == "result":
-                    return record
-                return record.get(item, default)
+        quote_asset = "TMN" if "TMN" in norm else ("TM" if "TM" in norm else "USDT")
+        base_asset = norm.replace(quote_asset, "") or "USDT"
 
-        envelope = OrderEnvelope(record)
-        envelope["status"] = FlexibleStatus("success")
-        envelope["result"] = record
-        return envelope
+        cost = quantity * exec_price
+        if side == "buy":
+            current_quote = self.get_balance(quote_asset)
+            if current_quote < cost:
+                return {"status": "rejected", "reason": f"Insufficient {quote_asset} balance"}
+            self.paper_balances[quote_asset] = current_quote - cost
+            if quote_asset == "TMN":
+                self.paper_balances["TM"] = self.paper_balances[quote_asset]
+            elif quote_asset == "TM":
+                self.paper_balances["TMN"] = self.paper_balances[quote_asset]
 
-    def cancel_order(self, client_order_id: str) -> Dict[str, Any]:
-        order = self.orders.get(client_order_id)
-        if not order:
-            return {"status": "failed", "error": "Order not found"}
-        if str(order["status"]).upper() == "FILLED":
-            return {"status": "failed", "error": "Cannot cancel filled order"}
-        order["status"] = "CANCELED"
-        return {"status": "success", "message": "Order canceled"}
+            self.paper_balances[base_asset] = self.get_balance(base_asset) + quantity
+        elif side == "sell":
+            current_base = self.get_balance(base_asset)
+            if current_base < quantity:
+                return {"status": "rejected", "reason": f"Insufficient {base_asset} balance"}
+            self.paper_balances[base_asset] = current_base - quantity
+            new_quote_bal = self.get_balance(quote_asset) + cost
+            self.paper_balances[quote_asset] = new_quote_bal
+            if quote_asset == "TMN":
+                self.paper_balances["TM"] = new_quote_bal
+            elif quote_asset == "TM":
+                self.paper_balances["TMN"] = new_quote_bal
+        else:
+            return {"status": "rejected", "reason": f"Unknown side: {side}"}
 
-    def get_order(self, client_order_id: str) -> Dict[str, Any]:
-        order = self.orders.get(client_order_id)
-        if not order:
-            return {"status": "failed", "error": "Order not found"}
-        return {"status": "success", "result": order}
+        record = {
+            "status": "filled",
+            "side": side,
+            "symbol": norm,
+            "price": exec_price,
+            "executed_price": exec_price,
+            "quantity": float(quantity),
+            "total_cost": cost,
+            "timestamp": time.time()
+        }
+        self.orders.append(record)
+        return record
