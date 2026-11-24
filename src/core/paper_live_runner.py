@@ -4,9 +4,13 @@ Connects market data ingestion, regime detection, signal generation,
 risk management, and simulated order execution into an end-to-end loop.
 """
 
+import time
+import logging
 from typing import Dict, Any, List, Optional
 from src.core.market_regime import MarketRegimeFilter, MarketRegime
 from src.core.portfolio_risk import PortfolioRiskManager
+
+logger = logging.getLogger("AtriaTrade.PaperTradingLiveRunner")
 
 
 class PaperTradingLiveRunner:
@@ -16,24 +20,90 @@ class PaperTradingLiveRunner:
         initial_balance: float = 10000.0,
         regime_filter: Optional[MarketRegimeFilter] = None,
         portfolio_risk: Optional[PortfolioRiskManager] = None,
-        executor: Optional[Any] = None
+        adapter: Optional[Any] = None,
+        strategy: Optional[Any] = None,
+        data_feed: Optional[Any] = None,
+        interval_seconds: int = 5,
+        executor: Optional[Any] = None,
     ):
         self.symbol = symbol
         self.balance = float(initial_balance)
         self.regime_filter = regime_filter or MarketRegimeFilter(fast_window=5, slow_window=15)
         self.portfolio_risk = portfolio_risk or PortfolioRiskManager(max_total_exposure_pct=0.5)
-        self.executor = executor
         
+        self.adapter = adapter
+        self.strategy = strategy
+        self.data_feed = data_feed
+        self.interval_seconds = interval_seconds
+        self.executor = executor
+
         self.candles: List[Dict[str, Any]] = []
         self.open_positions: Dict[str, Dict[str, Any]] = {}
         self.trade_history: List[Dict[str, Any]] = []
         self.is_running: bool = False
+        self.tick_count = 0
 
-    def start(self) -> None:
+    def start(self, max_ticks: Optional[int] = None) -> None:
+        """Starts the execution loop for paper trading."""
         self.is_running = True
+        logger.info(f"Starting PaperTradingLiveRunner for {self.symbol} with interval {self.interval_seconds}s")
+        
+        if self.data_feed is not None:
+            try:
+                while self.is_running:
+                    res = self.run_single_tick()
+                    logger.info(f"Tick {self.tick_count} result: {res.get('status')} - Price: {res.get('mid_price')}")
+                    
+                    if max_ticks and self.tick_count >= max_ticks:
+                        break
+                        
+                    time.sleep(self.interval_seconds)
+            except KeyboardInterrupt:
+                logger.info("PaperTradingLiveRunner stopped by user.")
+            finally:
+                self.stop()
 
     def stop(self) -> None:
         self.is_running = False
+        logger.info("PaperTradingLiveRunner stopped.")
+
+    def run_single_tick(self) -> Dict[str, Any]:
+        """Executes a single processing tick: fetches feed, checks signals, simulates execution."""
+        self.tick_count += 1
+        
+        mid_price = None
+        if self.data_feed is not None:
+            mid_price = self.data_feed.get_ticker_price(self.symbol)
+        
+        if mid_price is None or mid_price <= 0:
+            return {
+                "status": "skipped",
+                "tick": self.tick_count,
+                "reason": "Price feed unavailable or invalid"
+            }
+        
+        if hasattr(self.adapter, "update_market_price"):
+            self.adapter.update_market_price(self.symbol, mid_price)
+
+        executed_orders = []
+        if self.strategy is not None:
+            signal = self.strategy.evaluate({"symbol": self.symbol, "price": mid_price})
+            if signal and hasattr(self.adapter, "place_order"):
+                order = self.adapter.place_order(
+                    symbol=self.symbol,
+                    side=signal.get("side", "BUY"),
+                    order_type="MARKET",
+                    quantity=signal.get("quantity", 0)
+                )
+                executed_orders.append(order)
+
+        return {
+            "status": "success",
+            "tick": self.tick_count,
+            "symbol": self.symbol,
+            "mid_price": mid_price,
+            "orders_count": len(executed_orders)
+        }
 
     def ingest_candle(self, candle: Dict[str, Any]) -> Dict[str, Any]:
         """Ingests a new candle, detects regime, and checks trade conditions."""
@@ -63,7 +133,7 @@ class PaperTradingLiveRunner:
             "size": proposed_size,
             "side": "BUY"
         }
-        
+
         if self.portfolio_risk is not None:
             if hasattr(self.portfolio_risk, "validate_new_position"):
                 try:
@@ -97,8 +167,6 @@ class PaperTradingLiveRunner:
         if price <= 0:
             return {"status": "REJECTED", "reason": "Invalid price"}
 
-        # الف) اگر سیگنال SELL باشد و پوزیشن باز داشته باشیم -> اقدام به بستن پوزیشن (Exit Position)
-        # خروج از معامله وابسته به اجازه رژیم ورود نیست و باید انجام شود
         if side == "SELL" and self.open_positions:
             pos_id, pos = self.open_positions.popitem()
             pnl = (price - pos["entry_price"]) * pos["units"]
@@ -115,7 +183,6 @@ class PaperTradingLiveRunner:
             self.trade_history.append(close_res)
             return close_res
 
-        # ب) فیلتر رژیم بازار برای ورود به معاملات جدید (Entry)
         regime_info = self.regime_filter.detect_regime(self.candles)
         regime = regime_info.get("regime", MarketRegime.UNKNOWN)
 
@@ -125,7 +192,6 @@ class PaperTradingLiveRunner:
                 "reason": f"Signal {side} not allowed in regime {regime}"
             }
 
-        # ج) ورود به معامله خرید جدید (BUY Entry)
         trade_amount = self.balance * size_pct
         if side == "BUY":
             if not self._check_risk(trade_amount):
@@ -156,3 +222,6 @@ class PaperTradingLiveRunner:
                 return order_res
 
         return {"status": "REJECTED", "reason": "No actionable condition met"}
+
+# Alias for backward compatibility
+PaperLiveRunner = PaperTradingLiveRunner
