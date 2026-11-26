@@ -1,0 +1,5 @@
+AtriaTrade Full Test Suite
+Date: 2026-11-26
+Command: pytest -q
+Result: 628 passed in 7.51s
+Status: PASS
