@@ -1,102 +1,52 @@
 [
   {
     "tick": 1,
-    "symbol": "USDTTMN",
-    "mid_price": 289841.79,
+    "symbol": "BTCTM",
+    "mid_price": 289891.75,
     "status": "success",
     "balances": {
-      "TMN": 0.0,
-      "USDT": 0.0
+      "TM": 50000000.0,
+      "USDT": 100.0
     }
   },
   {
     "tick": 2,
-    "symbol": "USDTTMN",
-    "mid_price": 289969.56,
+    "symbol": "BTCTM",
+    "mid_price": 290106.93,
     "status": "success",
     "balances": {
-      "TMN": 0.0,
-      "USDT": 0.0
+      "TM": 50000000.0,
+      "USDT": 100.0
     }
   },
   {
     "tick": 3,
-    "symbol": "USDTTMN",
-    "mid_price": 290257.37,
+    "symbol": "BTCTM",
+    "mid_price": 289899.43,
     "status": "success",
     "balances": {
-      "TMN": 0.0,
-      "USDT": 0.0
+      "TM": 50000000.0,
+      "USDT": 100.0
     }
   },
   {
     "tick": 4,
-    "symbol": "USDTTMN",
-    "mid_price": 290574.85,
+    "symbol": "BTCTM",
+    "mid_price": 289889.87,
     "status": "success",
     "balances": {
-      "TMN": 0.0,
-      "USDT": 0.0
+      "TM": 50000000.0,
+      "USDT": 100.0
     }
   },
   {
     "tick": 5,
-    "symbol": "USDTTMN",
-    "mid_price": 290687.29,
+    "symbol": "BTCTM",
+    "mid_price": 289978.6,
     "status": "success",
     "balances": {
-      "TMN": 0.0,
-      "USDT": 0.0
-    }
-  },
-  {
-    "tick": 6,
-    "symbol": "USDTTMN",
-    "mid_price": 290885.06,
-    "status": "success",
-    "balances": {
-      "TMN": 0.0,
-      "USDT": 0.0
-    }
-  },
-  {
-    "tick": 7,
-    "symbol": "USDTTMN",
-    "mid_price": 290515.99,
-    "status": "success",
-    "balances": {
-      "TMN": 0.0,
-      "USDT": 0.0
-    }
-  },
-  {
-    "tick": 8,
-    "symbol": "USDTTMN",
-    "mid_price": 290086.65,
-    "status": "success",
-    "balances": {
-      "TMN": 0.0,
-      "USDT": 0.0
-    }
-  },
-  {
-    "tick": 9,
-    "symbol": "USDTTMN",
-    "mid_price": 289856.22,
-    "status": "success",
-    "balances": {
-      "TMN": 0.0,
-      "USDT": 0.0
-    }
-  },
-  {
-    "tick": 10,
-    "symbol": "USDTTMN",
-    "mid_price": 290140.06,
-    "status": "success",
-    "balances": {
-      "TMN": 0.0,
-      "USDT": 0.0
+      "TM": 50000000.0,
+      "USDT": 100.0
     }
   }
 ]

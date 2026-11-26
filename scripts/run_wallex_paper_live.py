@@ -86,10 +86,10 @@ def run_loop(duration_seconds=4, interval_seconds=2, symbol="BTCUSDT", runner=No
 
 
 def main():
-    symbol = "USDTTMN"
+    symbol = "BTCTM"
     logger.info("Starting Wallex Paper Live Session with Journal Logging...")
 
-    adapter = WallexPaperAdapter(initial_balances={"TMN": 50000000.0, "USDT": 100.0})
+    adapter = WallexPaperAdapter(initial_balances={"tm": 50000000.0, "usdt": 100.0})
 
     class DynamicWallexLiveDataFeed:
         def __init__(self, wallex_adapter, base_price=289483.50):
@@ -117,19 +117,19 @@ def main():
     session_logs = []
     for tick in range(1, 6):
         price = data_feed.get_ticker_price(symbol)
-        balances = adapter.get_balances() if hasattr(adapter, "get_balances") else {}
-        tmn_bal = balances.get("TMN", 0.0)
-        usdt_bal = balances.get("USDT", 0.0)
+        # Using correct adapter wallet keys ("tm" and "usdt")
+        tmn_bal = adapter.get_balance("tm") if hasattr(adapter, "get_balance") else 0.0
+        usdt_bal = adapter.get_balance("usdt") if hasattr(adapter, "get_balance") else 0.0
 
         tick_summary = {
             "tick": tick,
             "symbol": symbol,
             "mid_price": price,
             "status": "success",
-            "balances": {"TMN": tmn_bal, "USDT": usdt_bal}
+            "balances": {"TM": tmn_bal, "USDT": usdt_bal}
         }
         session_logs.append(tick_summary)
-        print(f"[TICK {tick}/5] Price: {price:,.2f} TMN | TMN Bal: {tmn_bal:,.0f} | USDT Bal: {usdt_bal:.2f} | Status: success")
+        print(f"[TICK {tick}/5] Price: {price:,.2f} TM | TM Bal: {tmn_bal:,.0f} | USDT Bal: {usdt_bal:.2f} | Status: success")
         time.sleep(1.0)
 
     logger.info("PaperTradingLiveRunner stopped.")
