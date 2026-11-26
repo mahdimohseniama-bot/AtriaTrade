@@ -1,0 +1,35 @@
+{
+  "strategy": "src.strategies.sma_cross.SMACrossStrategy",
+  "trades": [
+    {
+      "action": "BUY",
+      "price": 290000.0,
+      "result": {
+        "status": "FILLED",
+        "side": "buy",
+        "symbol": "BTCTM",
+        "price": 290000.0,
+        "quantity": 0.01,
+        "total_cost": 2900.0
+      }
+    },
+    {
+      "action": "SELL",
+      "price": 291000.0,
+      "pnl": 10.0,
+      "result": {
+        "status": "FILLED",
+        "side": "sell",
+        "symbol": "BTCTM",
+        "price": 291000.0,
+        "quantity": 0.01,
+        "total_cost": 2910.0
+      }
+    }
+  ],
+  "final_balances": {
+    "tm": 50000010.0,
+    "usdt": 100.0
+  },
+  "realized_pnl_gross": 10.0
+}
