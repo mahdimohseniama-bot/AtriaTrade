@@ -218,15 +218,29 @@ class WallexPaperAdapter:
         norm = self.normalize_symbol(symbol)
         exec_price = float(price) if price else self.get_market_price(symbol)
 
-        quote_asset = "TMN" if "TMN" in norm else ("TM" if "TM" in norm else "USDT")
-        base_asset = norm.replace(quote_asset, "") or "USDT"
+        clean_norm = norm.replace("-", "").replace("_", "").replace("/", "")
+        if clean_norm.endswith("TMN"):
+            quote_asset = "TMN"
+            base_asset = clean_norm[:-3]
+        elif clean_norm.endswith("USDT"):
+            quote_asset = "USDT"
+            base_asset = clean_norm[:-4]
+        elif clean_norm.endswith("TM"):
+            quote_asset = "TMN"
+            base_asset = clean_norm[:-2]
+        else:
+            quote_asset = "USDT"
+            base_asset = clean_norm.replace(quote_asset, "") or "BTC"
+        base_asset = base_asset or "BTC"
 
         cost = quantity * exec_price
+        fee = cost * 0.001  # 0.1% fee
+        total_debit = cost + fee
         if side == "buy":
             current_quote = self.get_balance(quote_asset)
-            if current_quote < cost:
+            if current_quote < total_debit:
                 return {"status": "rejected", "reason": f"Insufficient {quote_asset} balance"}
-            self.paper_balances[quote_asset] = current_quote - cost
+            self.paper_balances[quote_asset] = current_quote - total_debit
             if quote_asset == "TMN":
                 self.paper_balances["TM"] = self.paper_balances[quote_asset]
             elif quote_asset == "TM":

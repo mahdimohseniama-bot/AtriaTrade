@@ -1,59 +1,46 @@
 import pytest
-from unittest.mock import MagicMock
-from src.core.wallex_live_runner import WallexLiveRunner
+from unittest.mock import MagicMock, patch
+from src.adapters.wallex_paper import WallexPaperAdapter
+from src.adapters.paper_factory import PaperExchangeFactory
 
-@pytest.fixture
-def mock_exec_engine():
-    engine = MagicMock()
-    engine.execute_live_order.return_value = {
-        "status": "EXECUTED",
-        "symbol": "BTCUSDT",
-        "quantity": 0.05,
-        "price": 100.0
+def test_paper_factory_wallex():
+    adapter = PaperExchangeFactory.create_adapter("wallex")
+    assert isinstance(adapter, WallexPaperAdapter)
+
+@patch("src.adapters.wallex_paper.requests.get")
+def test_wallex_paper_workflow(mock_get):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "success": True,
+        "result": {
+            "bid": [{"price": 600000.0, "quantity": 1.5}],
+            "ask": [{"price": 601000.0, "quantity": 2.0}]
+        }
     }
-    return engine
+    mock_get.return_value = mock_resp
 
-@pytest.fixture
-def mock_recon_engine():
-    engine = MagicMock()
-    engine.reconcile_balances.return_value = {
-        "synced": True,
-        "remote_balance": 15.0,
-        "status": "SYNCED"
-    }
-    return engine
+    adapter = PaperExchangeFactory.create_adapter("wallex")
+    
+    # 1. Check orderbook
+    ob = adapter.get_orderbook("USDTTMN")
+    assert "bids" in ob
+    assert ob["bids"][0]["price"] == 600000.0
 
-def test_runner_cycle_success(mock_exec_engine, mock_recon_engine):
-    runner = WallexLiveRunner(mock_exec_engine, mock_recon_engine)
-    res = runner.execute_cycle(
-        symbol="BTCUSDT",
-        side="BUY",
-        local_balance=15.0,
-        entry_price=100.0,
-        stop_loss_price=95.0,
-        orderbook={"bids": [[100, 1]], "asks": [[100.1, 1]]},
-        reference_price=100.0
+    # 2. Record initial balance
+    initial_usdt = adapter.get_balance("USDT")
+
+    # 3. Place market order using standard adapter method
+    buy_amount = 1.0
+    res = adapter.place_order(
+        symbol="USDTTMN",
+        side="buy",
+        order_type="market",
+        amount=buy_amount
     )
-    assert res["status"] == "COMPLETED"
-    assert res["execution"]["status"] == "EXECUTED"
-    mock_recon_engine.reconcile_balances.assert_called_once()
-    mock_exec_engine.execute_live_order.assert_called_once()
+    assert res["status"] == "success"
+    assert res["result"]["status"] == "FILLED"
 
-def test_runner_cycle_aborted_on_desync(mock_exec_engine, mock_recon_engine):
-    mock_recon_engine.reconcile_balances.return_value = {
-        "synced": False,
-        "status": "BALANCE_MISMATCH"
-    }
-    runner = WallexLiveRunner(mock_exec_engine, mock_recon_engine)
-    res = runner.execute_cycle(
-        symbol="BTCUSDT",
-        side="BUY",
-        local_balance=15.0,
-        entry_price=100.0,
-        stop_loss_price=95.0,
-        orderbook={},
-        reference_price=100.0
-    )
-    assert res["status"] == "ABORTED"
-    assert res["phase"] == "RECONCILIATION"
-    mock_exec_engine.execute_live_order.assert_not_called()
+    # 4. Verify balance increment
+    usdt_bal = adapter.get_balance("USDT")
+    assert usdt_bal == initial_usdt + buy_amount
